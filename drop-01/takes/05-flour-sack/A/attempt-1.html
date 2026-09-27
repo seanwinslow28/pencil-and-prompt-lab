@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: #1f1d1a; }
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  canvas { display: block; width: 960px; height: 540px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+<canvas id="stage" width="960" height="540"></canvas>
+<script>
+(function () {
+  const cv = document.getElementById('stage');
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  cv.width = 960 * dpr;
+  cv.height = 540 * dpr;
+  const ctx = cv.getContext('2d');
+
+  const W = 960, H = 540, GROUND = 430, LOOP = 24, SH = 185, HW = 72;
+
+  // ---------- easing ----------
+  const E = {
+    l: u => u,
+    io: u => u * u * (3 - 2 * u),
+    o: u => 1 - (1 - u) * (1 - u),
+    i: u => u * u,
+    ob: u => { const c = 1.9, v = u - 1; return 1 + (c + 1) * v * v * v + c * v * v; }
+  };
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+  // ---------- keyframe tracks ----------
+  const NAMES = ['x', 'lift', 'sy', 'sx', 'lean', 'bend', 'ear', 'spin', 'shake', 'breath', 'huff'];
+  const TR = {};
+  NAMES.forEach(n => TR[n] = []);
+  function k(n, t, v, e) { TR[n].push([t, v, e || 'io']); }
+
+  const IMPACTS = [];
+  const DRIPS = [13.12, 13.5, 13.86];
+
+  function hop(t0, T, h, x0, x1, opt) {
+    const o = Object.assign({ ant: 0.2, sa: 0.8, ss: 1.2, sl: 0.75, rec: true, base: 1, r1: 0.14, r2: 0.28, imp: 0.3 }, opt);
+    const L = t0 + T;
+    if (o.ant > 0) k('sy', t0 - o.ant, o.sa, 'io');
+    k('sy', t0 + 0.07, o.ss, 'o');
+    k('sy', t0 + T * 0.5, o.base + (o.ss - o.base) * 0.2, 'io');
+    k('sy', L - 0.05, o.base + (o.ss - o.base) * 0.6, 'io');
+    k('sy', L + 0.05, o.sl, 'o');
+    if (o.rec) {
+      k('sy', L + o.r1, o.base + (o.base - o.sl) * 0.3, 'io');
+      k('sy', L + o.r2, o.base, 'io');
+    }
+    k('lift', t0, 0, 'l'); k('lift', t0 + T / 2, h, 'o'); k('lift', L, 0, 'i');
+    k('x', t0, x0, 'io'); k('x', L, x1, 'l');
+    IMPACTS.push([L, o.imp, x1]);
+  }
+
+  // loop boundaries (neutral)
+  const NEU = { x: 480, lift: 0, sy: 1, sx: 1, lean: 0, bend: 0, ear: 0, spin: 0, shake: 0, breath: 1, huff: 0 };
+  NAMES.forEach(n => { k(n, 0, NEU[n]); k(n, LOOP, n === 'spin' ? 1 : NEU[n]); });
+
+  // ===== JOY (≈1 – 8 s) =====
+  k('sy', 0.9, 1); k('sy', 1.12, 1.06, 'o');
+  k('ear', 0.9, 0); k('ear', 1.2, 0.8, 'o'); k('ear', 1.7, 1); k('ear', 8.2, 1);
+  k('lean', 1.15, 0); k('lean', 1.5, -0.07); k('lean', 1.62, 0.02, 'o'); k('lean', 2.3, 0);
+  k('lean', 2.6, 0.12); k('lean', 3.5, 0.12); k('lean', 3.8, -0.05, 'o'); k('lean', 4.0, 0);
+  k('lean', 4.3, 0.07); k('lean', 4.5, -0.1); k('lean', 5.3, -0.08); k('lean', 5.45, 0.06, 'o');
+  k('lean', 5.8, 0); k('lean', 6.05, 0.14); k('lean', 6.5, -0.14); k('lean', 6.95, 0.14);
+  k('lean', 7.4, -0.08); k('lean', 7.8, 0);
+  k('bend', 5.8, 0); k('bend', 6.05, 0.2); k('bend', 6.5, -0.2); k('bend', 6.95, 0.2);
+  k('bend', 7.4, -0.12); k('bend', 7.8, 0);
+  k('sx', 1.15, 1); k('sx', 1.5, 1.06); k('sx', 1.7, 0.97, 'o'); k('sx', 2.1, 1);
+  k('sx', 4.1, 1); k('sx', 4.32, 1.08); k('sx', 4.55, 0.95); k('sx', 4.9, 1);
+  k('sx', 5.41, 1.08, 'o'); k('sx', 5.7, 1);
+  k('spin', 4.5, 0); k('spin', 5.25, 1);
+
+  hop(1.62, 0.84, 150, 480, 480, { ant: 0.12, sa: 0.78, ss: 1.28, sl: 0.72, rec: false, imp: 0.55 });
+  hop(2.58, 0.44, 70, 480, 560, { ant: 0, ss: 1.16, sl: 0.8, rec: false, imp: 0.3 });
+  hop(3.14, 0.44, 70, 560, 640, { ant: 0, ss: 1.16, sl: 0.74, rec: true, imp: 0.35 });
+  hop(4.46, 0.9, 185, 640, 480, { ant: 0.14, sa: 0.74, ss: 1.3, sl: 0.7, rec: true, r1: 0.16, r2: 0.32, imp: 0.6 });
+  hop(5.85, 0.28, 16, 480, 480, { ant: 0.1, sa: 0.9, ss: 1.1, sl: 0.88, rec: false, imp: 0.12 });
+  hop(6.30, 0.28, 16, 480, 480, { ant: 0, ss: 1.1, sl: 0.88, rec: false, imp: 0.12 });
+  hop(6.75, 0.28, 16, 480, 480, { ant: 0, ss: 1.1, sl: 0.88, rec: false, imp: 0.12 });
+  hop(7.20, 0.28, 16, 480, 480, { ant: 0, ss: 1.1, sl: 0.88, rec: true, r1: 0.1, r2: 0.19, imp: 0.12 });
+
+  // ===== SADNESS (≈8.5 – 15.6 s) =====
+  k('sy', 8.5, 1); k('sy', 8.95, 1.04, 'o'); k('sy', 9.4, 1.03); k('sy', 11.0, 0.84);
+  k('sy', 12.1, 0.92); k('sy', 12.9, 0.78); k('sy', 13.02, 0.78); k('sy', 13.1, 0.83, 'o');
+  k('sy', 13.38, 0.78); k('sy', 13.48, 0.82, 'o'); k('sy', 13.74, 0.78); k('sy', 13.84, 0.81, 'o');
+  k('sy', 14.1, 0.78); k('sy', 15.0, 0.76); k('sy', 15.6, 0.76);
+  k('sx', 9.4, 1); k('sx', 11.0, 1.08); k('sx', 12.1, 1.03); k('sx', 12.9, 1.1); k('sx', 15.6, 1.1);
+  k('bend', 9.4, 0); k('bend', 11.0, -0.85); k('bend', 12.1, -0.55); k('bend', 12.9, -1.08);
+  k('bend', 13.02, -1.08); k('bend', 13.1, -0.99, 'o'); k('bend', 13.38, -1.08);
+  k('bend', 13.48, -1.0, 'o'); k('bend', 13.74, -1.08); k('bend', 13.84, -1.02, 'o');
+  k('bend', 14.1, -1.1); k('bend', 15.0, -1.15); k('bend', 15.6, -1.15);
+  k('lean', 9.4, 0); k('lean', 11.0, -0.06); k('lean', 15.6, -0.08);
+  k('ear', 8.7, 0.4); k('ear', 9.4, 0.5); k('ear', 10.6, -0.9); k('ear', 11.0, -0.9);
+  k('ear', 12.1, -0.5); k('ear', 12.9, -1.05); k('ear', 15.6, -1.05);
+  k('x', 9.4, 480); k('x', 11.0, 470); k('x', 15.6, 470);
+  k('breath', 8.5, 1); k('breath', 8.9, 0); k('breath', 14.2, 0); k('breath', 15.0, 0.8);
+  k('breath', 15.6, 0.6); k('breath', 16.3, 0); k('breath', 22.4, 0); k('breath', 23.6, 1);
+
+  // ===== ANGER (≈15.6 – 22.4 s) =====
+  k('shake', 15.6, 0); k('shake', 16.5, 1.2, 'i'); k('shake', 17.05, 2.2); k('shake', 17.9, 1.8);
+  k('shake', 19.5, 1.8); k('shake', 19.95, 3.5); k('shake', 20.07, 0, 'l'); k('shake', 20.67, 0);
+  k('shake', 20.75, 2.5, 'o'); k('shake', 22.0, 1.2); k('shake', 22.6, 0);
+  k('bend', 16.5, -0.9); k('bend', 17.05, 0.12, 'ob'); k('bend', 19.6, 0.1); k('bend', 19.95, -0.15);
+  k('bend', 20.3, 0.1); k('bend', 20.67, 0.35, 'i'); k('bend', 20.85, 0.05, 'o'); k('bend', 21.0, 0.15);
+  k('bend', 22.2, 0.15); k('bend', 22.9, 0);
+  k('sy', 16.5, 0.8); k('sy', 17.05, 1.18, 'ob'); k('sy', 17.5, 1.15);
+  k('sx', 16.5, 1.06); k('sx', 17.05, 1.16, 'ob'); k('sx', 19.6, 1.16); k('sx', 19.95, 1.24);
+  k('sx', 20.2, 1.04); k('sx', 20.66, 1.02); k('sx', 20.72, 1.28, 'o'); k('sx', 21.0, 1.16);
+  k('sx', 22.2, 1.16); k('sx', 22.9, 1.0);
+  k('ear', 16.4, -0.8); k('ear', 17.05, 1.35, 'ob'); k('ear', 22.2, 1.35); k('ear', 22.9, 0.1);
+  k('lean', 16.5, -0.05); k('lean', 17.05, 0.06, 'ob'); k('lean', 17.9, 0.1); k('lean', 19.6, 0.1);
+  k('lean', 19.95, -0.12); k('lean', 20.4, 0.05); k('lean', 20.67, 0.16, 'i'); k('lean', 20.85, 0.08, 'o');
+  k('lean', 22.2, 0.1); k('lean', 22.9, 0); k('lean', 23.1, 0.05); k('lean', 23.3, -0.08);
+  k('lean', 23.58, -0.05); k('lean', 23.8, 0.03);
+  k('x', 16.5, 472); k('x', 17.05, 480); k('x', 22.9, 540);
+  k('huff', 21.0, 0); k('huff', 21.15, 1, 'o'); k('huff', 22.2, 0.5); k('huff', 22.6, 0);
+  k('sy', 22.2, 1.12); k('sy', 22.9, 0.92);
+
+  const stomp = { ant: 0.1, sa: 1.02, ss: 1.3, sl: 0.68, base: 1.15, rec: true, r1: 0.12, r2: 0.2 };
+  hop(17.9, 0.28, 26, 480, 492, Object.assign({}, stomp, { imp: 0.7 }));
+  hop(18.5, 0.28, 26, 492, 504, Object.assign({}, stomp, { imp: 0.8 }));
+  hop(19.1, 0.28, 26, 504, 516, Object.assign({}, stomp, { imp: 0.9 }));
+  hop(20.07, 0.6, 140, 516, 540, { ant: 0.12, sa: 0.62, ss: 1.38, sl: 0.55, base: 1.12, rec: true, r1: 0.16, r2: 0.33, imp: 1.6 });
+  // calm little hop back to the mark
+  hop(23.22, 0.36, 28, 540, 480, { ant: 0.12, sa: 0.88, ss: 1.1, sl: 0.86, rec: true, r1: 0.12, r2: 0.26, imp: 0.2 });
+
+  NAMES.forEach(n => TR[n].sort((a, b) => a[0] - b[0]));
+
+  function ev(n, t) {
+    const a = TR[n];
+    if (t <= a[0][0]) return a[0][1];
+    const last = a[a.length - 1];
+    if (t >= last[0]) return last[1];
+    let lo = 0, hi = a.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (a[m][0] <= t) lo = m; else hi = m; }
+    const p = a[lo], q = a[hi], d = q[0] - p[0];
+    const u = d > 0 ? (t - p[0]) / d : 1;
+    return p[1] + (q[1] - p[1]) * E[q[2]](u);
+  }
+  function pose(t) { const o = {}; for (const n of NAMES) o[n] = ev(n, t); return o; }
+
+  // ---------- sack geometry ----------
+  function prof(t, sx) {
+    const r = 0.86 + 0.14 * Math.sqrt(Math.min(1, t / 0.07));
+    const b = HW * (0.95 + 0.07 * Math.sin(Math.PI * t) - 0.05 * t);
+    const p = 1 + (sx - 1) * 0.9 * (Math.sin(Math.PI * t) - 0.55);
+    return b * r * p;
+  }
+
+  function drawSack(q) {
+    const N = 48, Hh = SH * q.sy;
+    let sf = Math.cos(2 * Math.PI * q.spin);
+    if (Math.abs(sf) < 0.12) sf = sf < 0 ? -0.12 : 0.12;
+    const wf = q.sx / Math.sqrt(q.sy) * sf;
+    const kap = q.bend / Hh, sk = Math.abs(kap) > 1e-5 ? Math.sign(kap) : 0;
+    const maxOff = sk ? 0.9 / Math.abs(kap) : 1e9;
+
+    const P = [], A = [], R = [], L = [];
+    let px = q.x, py = q.lift;
+    const ds = Hh / N;
+    for (let i = 0; i <= N; i++) {
+      const tt = i / N;
+      if (i > 0) {
+        const am = q.lean + q.bend * (tt - 0.5 / N);
+        px += Math.sin(am) * ds; py += Math.cos(am) * ds;
+      }
+      const a = q.lean + q.bend * tt;
+      const hw = prof(tt, q.sx);
+      let oR = hw * wf, oL = -oR;
+      if (sk) {
+        if (Math.sign(oR) === sk && Math.abs(oR) > maxOff) oR = sk * maxOff;
+        if (Math.sign(oL) === sk && Math.abs(oL) > maxOff) oL = sk * maxOff;
+      }
+      const nx = Math.cos(a), ny = -Math.sin(a);
+      P.push([px, py]); A.push(a);
+      R.push([px + nx * oR, py + ny * oR]);
+      L.push([px + nx * oL, py + ny * oL]);
+    }
+
+    const s = wf < 0 ? -1 : 1, aT = A[N];
+    const CR = R[N], CL = L[N];
+    const IR = [P[N][0] + (CR[0] - P[N][0]) * 0.62, P[N][1] + (CR[1] - P[N][1]) * 0.62];
+    const IL = [P[N][0] + (CL[0] - P[N][0]) * 0.62, P[N][1] + (CL[1] - P[N][1]) * 0.62];
+    const thR = aT + s * q.angR, thL = aT - s * q.angL;
+    const TRp = [CR[0] + Math.sin(thR) * q.elen, CR[1] + Math.cos(thR) * q.elen];
+    const TLp = [CL[0] + Math.sin(thL) * q.elen, CL[1] + Math.cos(thL) * q.elen];
+
+    // keep everything above the floor (pivot on corners)
+    let minY = Math.min(TRp[1], TLp[1]);
+    for (let i = 0; i <= N; i++) minY = Math.min(minY, R[i][1], L[i][1]);
+    if (minY < 0) {
+      const sh = -minY;
+      for (let i = 0; i <= N; i++) { P[i][1] += sh; R[i][1] += sh; L[i][1] += sh; }
+      IR[1] += sh; IL[1] += sh; TRp[1] += sh; TLp[1] += sh;
+    }
+
+    const up0 = [Math.sin(A[0]), Math.cos(A[0])], upT = [Math.sin(aT), Math.cos(aT)];
+    const bul = Math.min(7, P[0][1] * 0.12);
+    const botC = [P[0][0] - up0[0] * bul, P[0][1] - up0[1] * bul];
+    const topC = [P[N][0] - upT[0] * 6, P[N][1] - upT[1] * 6];
+
+    // shadow
+    const lf = Math.max(0, 1 - P[0][1] / 320);
+    ctx.fillStyle = 'rgba(40,28,16,' + (0.3 * (0.25 + 0.75 * lf)).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.ellipse(P[0][0], GROUND + 3, Math.max(20, HW * Math.abs(wf) * 1.15) * (0.5 + 0.5 * lf), 10 * (0.55 + 0.45 * lf), 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // body path
+    const path = new Path2D();
+    const mv = p => path.moveTo(p[0], GROUND - p[1]);
+    const ln = p => path.lineTo(p[0], GROUND - p[1]);
+    const qd = (c, p) => path.quadraticCurveTo(c[0], GROUND - c[1], p[0], GROUND - p[1]);
+    const i86 = Math.round(N * 0.86);
+    mv(L[0]); qd(botC, R[0]);
+    for (let i = 1; i <= i86; i++) ln(R[i]);
+    qd(CR, TRp); qd(CR, IR); qd(topC, IL); qd(CL, TLp); qd(CL, L[i86]);
+    for (let i = i86 - 1; i >= 1; i--) ln(L[i]);
+    path.closePath();
+
+    ctx.fillStyle = '#eee2c4';
+    ctx.fill(path);
+
+    ctx.save();
+    ctx.clip(path);
+
+    // printed stripes
+    ctx.fillStyle = '#6f8db0';
+    const band = (a, b) => {
+      const ia = Math.round(a * N), ib = Math.round(b * N);
+      ctx.beginPath();
+      ctx.moveTo(L[ia][0], GROUND - L[ia][1]);
+      for (let i = ia + 1; i <= ib; i++) ctx.lineTo(L[i][0], GROUND - L[i][1]);
+      for (let i = ib; i >= ia; i--) ctx.lineTo(R[i][0], GROUND - R[i][1]);
+      ctx.closePath(); ctx.fill();
+    };
+    band(0.30, 0.355);
+    band(0.405, 0.44);
+
+    // shading
+    const mid = Math.round(N * 0.5);
+    let g = ctx.createLinearGradient(L[mid][0], GROUND - L[mid][1], R[mid][0], GROUND - R[mid][1]);
+    g.addColorStop(0, 'rgba(255,252,240,0.35)');
+    g.addColorStop(0.45, 'rgba(255,252,240,0)');
+    g.addColorStop(1, 'rgba(90,62,32,0.24)');
+    ctx.fillStyle = g; ctx.fillRect(-60, -60, W + 120, H + 120);
+    const i33 = Math.round(N * 0.33);
+    g = ctx.createLinearGradient(P[0][0], GROUND - P[0][1], P[i33][0], GROUND - P[i33][1]);
+    g.addColorStop(0, 'rgba(90,62,32,0.25)');
+    g.addColorStop(1, 'rgba(90,62,32,0)');
+    ctx.fillStyle = g; ctx.fillRect(-60, -60, W + 120, H + 120);
+
+    // stitching near the top
+    const i9 = Math.round(N * 0.9);
+    const sA = [L[i9][0] + (R[i9][0] - L[i9][0]) * 0.08, L[i9][1] + (R[i9][1] - L[i9][1]) * 0.08];
+    const sB = [L[i9][0] + (R[i9][0] - L[i9][0]) * 0.92, L[i9][1] + (R[i9][1] - L[i9][1]) * 0.92];
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = 'rgba(74,58,40,0.55)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(sA[0], GROUND - sA[1]); ctx.lineTo(sB[0], GROUND - sB[1]); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // creases
+    ctx.strokeStyle = 'rgba(84,62,38,0.5)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    const crease = (e, c, len) => {
+      const dx = c[0] - e[0], dy = c[1] - e[1], d = Math.hypot(dx, dy) || 1;
+      ctx.beginPath(); ctx.moveTo(e[0], GROUND - e[1]);
+      ctx.lineTo(e[0] + dx / d * len, GROUND - (e[1] + dy / d * len)); ctx.stroke();
+    };
+    const cb = Math.abs(q.bend) - 0.35;
+    if (cb > 0) {
+      const side = (Math.sign(wf) === Math.sign(q.bend)) ? R : L;
+      [0.4, 0.52, 0.64].forEach((tt, j) => {
+        const i = Math.round(tt * N);
+        crease(side[i], P[i], Math.min(38, cb * 55) * (j === 1 ? 1 : 0.7));
+      });
+    }
+    if (q.sy < 0.92) {
+      const amt = Math.min(1, (0.92 - q.sy) / 0.3);
+      [R, L].forEach(side => {
+        [0.1, 0.22].forEach(tt => {
+          const i = Math.round(tt * N);
+          crease(side[i], P[Math.min(N, i + 6)], 26 * amt);
+        });
+      });
+    }
+    ctx.restore();
+
+    // outline
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = '#4b3a27'; ctx.lineWidth = 3;
+    ctx.stroke(path);
+
+    // corner ties
+    const tie = (C, T) => {
+      const dx = T[0] - C[0], dy = T[1] - C[1], d = Math.hypot(dx, dy) || 1;
+      const m = [C[0] + dx * 0.2, C[1] + dy * 0.2];
+      const px2 = -dy / d * 5, py2 = dx / d * 5;
+      ctx.beginPath();
+      ctx.moveTo(m[0] - px2, GROUND - (m[1] - py2));
+      ctx.lineTo(m[0] + px2, GROUND - (m[1] + py2));
+      ctx.stroke();
+    };
+    ctx.lineWidth = 3;
+    tie(CR, TRp); tie(CL, TLp);
+
+    const lowTip = TRp[1] < TLp[1] ? TRp : TLp;
+    return { lowTip: [lowTip[0], GROUND - lowTip[1]], width: 2 * HW * Math.abs(q.sx / Math.sqrt(q.sy)) };
+  }
+
+  // ---------- background ----------
+  function drawBG() {
+    let g = ctx.createLinearGradient(0, 0, 0, GROUND);
+    g.addColorStop(0, '#a99c85'); g.addColorStop(1, '#c4b79e');
+    ctx.fillStyle = g; ctx.fillRect(-40, -40, W + 80, GROUND + 40);
+    const rg = ctx.createRadialGradient(480, 300, 20, 480, 300, 520);
+    rg.addColorStop(0, 'rgba(255,245,225,0.35)'); rg.addColorStop(1, 'rgba(255,245,225,0)');
+    ctx.fillStyle = rg; ctx.fillRect(-40, -40, W + 80, GROUND + 40);
+    g = ctx.createLinearGradient(0, GROUND, 0, H);
+    g.addColorStop(0, '#978a71'); g.addColorStop(1, '#7c705a');
+    ctx.fillStyle = g; ctx.fillRect(-40, GROUND, W + 80, H - GROUND + 40);
+    ctx.fillStyle = 'rgba(60,48,34,0.28)'; ctx.fillRect(-40, GROUND - 1, W + 80, 2);
+  }
+
+  // ---------- particles ----------
+  let parts = [], puddles = [];
+  function dust(x, str, width) {
+    const n = Math.round(5 + 18 * str);
+    for (let i = 0; i < n; i++) {
+      const s = Math.random() < 0.5 ? -1 : 1;
+      parts.push({
+        k: 0, d: 0,
+        x: x + s * width * 0.5 * (0.5 + 0.5 * Math.random()),
+        y: GROUND - 2 - Math.random() * 6,
+        vx: s * ((40 + 230 * Math.random()) * str + 20),
+        vy: -(15 + 70 * Math.random()) * str,
+        r: 3 + 7 * Math.random() * Math.min(1.3, 0.5 + str),
+        g: 1.6 + Math.random(),
+        age: 0, life: 0.6 + 0.7 * Math.random(),
+        front: Math.random() < 0.5
+      });
+    }
+  }
+  function drip(x, y) {
+    for (let i = 0; i < 4; i++) {
+      parts.push({
+        k: 1, d: i * 0.07,
+        x: x + (Math.random() - 0.5) * 4, y: y + Math.random() * 3,
+        vx: (Math.random() - 0.5) * 14, vy: 10 + Math.random() * 30,
+        r: 1.6 + Math.random() * 1.3, age: 0, life: 5, front: true
+      });
+    }
+  }
+  function addPuddle(x) {
+    for (const p of puddles) { if (Math.abs(p.x - x) < 12) { p.amt += 1; p.age = 0; return; } }
+    puddles.push({ x: x, amt: 1, age: 0 });
+  }
+  function updateParts(dt) {
+    const born = [];
+    for (const p of parts) {
+      if (p.d > 0) { p.d -= dt; continue; }
+      p.age += dt;
+      if (p.k === 0) {
+        p.vx *= Math.exp(-3.2 * dt); p.vy *= Math.exp(-2.5 * dt); p.vy -= 8 * dt;
+        p.x += p.vx * dt; p.y += p.vy * dt; p.r += 12 * p.g * dt;
+      } else {
+        p.vy += 1300 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+        if (p.y >= GROUND + 1) {
+          p.age = p.life;
+          addPuddle(p.x);
+          born.push({ k: 0, d: 0, x: p.x, y: GROUND, vx: (Math.random() - 0.5) * 40, vy: -10, r: 1.5, g: 0.5, age: 0, life: 0.4, front: true });
+        }
+      }
+    }
+    parts = parts.filter(p => p.age < p.life).concat(born);
+    for (const p of puddles) { p.age += dt; if (p.age > 2.5) p.amt -= dt * 1.2; }
+    puddles = puddles.filter(p => p.amt > 0);
+  }
+  function drawParts(front) {
+    for (const p of parts) {
+      if (p.front !== front || p.d > 0) continue;
+      const u = p.age / p.life;
+      if (p.k === 0) {
+        ctx.fillStyle = 'rgba(246,242,232,' + (0.5 * Math.pow(1 - u, 1.4)).toFixed(3) + ')';
+      } else {
+        ctx.fillStyle = '#fbf8f0';
+      }
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  function drawPuddles() {
+    for (const p of puddles) {
+      ctx.fillStyle = 'rgba(250,247,238,' + Math.min(0.85, 0.25 + p.amt * 0.12).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.ellipse(p.x, GROUND + 2, 3 + p.amt * 1.6, 1.3 + p.amt * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ---------- secondary motion springs ----------
+  const earR = { a: 0, v: 0 }, earL = { a: 0, v: 0 }, bs = { a: 0, v: 0 };
+  const eA = e => e >= 0 ? 0.75 - 0.42 * e : 0.75 - 1.0 * e;
+
+  function crossed(te, a, b) { return a <= b ? (te > a && te <= b) : (te > a || te <= b); }
+
+  let start = null, last = 0, prevT = 0, cam = 0;
+  let lastTip = [480, 300], lastW = 150;
+
+  function frame(now) {
+    if (start === null) { start = now; last = now; }
+    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+    last = now;
+    const T = ((now - start) / 1000) % LOOP;
+
+    // events
+    for (const e of IMPACTS) {
+      if (crossed(e[0], prevT, T)) {
+        dust(e[2], e[1], lastW * 1.15);
+        if (e[1] > 0.65) cam = Math.max(cam, e[1] * 5.5);
+      }
+    }
+    for (const td of DRIPS) if (crossed(td, prevT, T)) drip(lastTip[0], lastTip[1]);
+    prevT = T;
+
+    // base pose + derivatives for follow-through
+    const h = 0.04;
+    const P0 = pose(T), Pm = pose(T - h), Pp = pose(T + h);
+    const top = o => o.lift + SH * o.sy;
+    const accUp = clamp((top(Pp) - 2 * top(P0) + top(Pm)) / (h * h), -25000, 25000);
+    const accX = clamp((Pp.x - 2 * P0.x + Pm.x) / (h * h), -25000, 25000);
+    const bAcc = (Pp.bend - 2 * P0.bend + Pm.bend) / (h * h) + (Pp.lean - 2 * P0.lean + Pm.lean) / (h * h);
+
+    const n = 3, sd = dt / n;
+    for (let i = 0; i < n; i++) {
+      earR.v += (-190 * earR.a - 10 * earR.v + accUp * 0.008 - accX * 0.012) * sd; earR.a += earR.v * sd;
+      earL.v += (-175 * earL.a - 9 * earL.v + accUp * 0.008 + accX * 0.012) * sd; earL.a += earL.v * sd;
+      bs.v += (-120 * bs.a - 9 * bs.v - accX * 0.004 - bAcc * 0.35) * sd; bs.a += bs.v * sd;
+    }
+    earR.a = clamp(earR.a, -1.5, 1.5); earL.a = clamp(earL.a, -1.5, 1.5); bs.a = clamp(bs.a, -0.5, 0.5);
+
+    // overlays
+    const sh = P0.shake;
+    const jx = sh * (Math.sin(T * 71) * 0.6 + Math.sin(T * 113 + 1.3) * 0.4);
+    const jr = sh * 0.006 * Math.sin(T * 97 + 2);
+    const hs = Math.sin(2 * Math.PI * 3 * T);
+    const sy = P0.sy + 0.016 * P0.breath * Math.sin(2 * Math.PI * T / 2.4) + 0.045 * P0.huff * hs;
+    const sx = P0.sx - 0.02 * P0.huff * hs;
+    const eb = eA(P0.ear) + sh * 0.03 * Math.sin(T * 89) + 0.05 * P0.huff * Math.sin(2 * Math.PI * 3 * T + 1);
+
+    const q = {
+      x: P0.x + jx, lift: P0.lift, sy: sy, sx: sx,
+      lean: P0.lean + jr + 0.015 * P0.huff * hs,
+      bend: P0.bend + bs.a, spin: P0.spin,
+      angR: clamp(eb + earR.a, 0.02, 2.95),
+      angL: clamp(eb + earL.a, 0.02, 2.95),
+      elen: clamp(26 + 6 * P0.ear, 19, 34)
+    };
+
+    updateParts(dt);
+
+    // render
+    cam *= Math.exp(-7 * dt);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(cam * Math.sin(now * 0.071), cam * Math.cos(now * 0.059));
+    drawBG();
+    drawPuddles();
+    drawParts(false);
+    const info = drawSack(q);
+    drawParts(true);
+    lastTip = info.lowTip;
+    lastW = info.width;
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

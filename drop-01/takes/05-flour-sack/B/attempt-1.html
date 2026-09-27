@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sack</title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;background:#0e0f12;overflow:hidden}
+  body{display:flex;align-items:center;justify-content:center}
+  #stage{display:block;width:960px;height:540px;border-radius:3px;
+         box-shadow:0 24px 70px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.04)}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ============================ stage ============================ */
+const SW=960, SH=540;
+const cv=document.getElementById('stage');
+const dpr=Math.min(2, window.devicePixelRatio||1);
+cv.width=Math.round(SW*dpr); cv.height=Math.round(SH*dpr);
+cv.style.width=SW+'px'; cv.style.height=SH+'px';
+const ctx=cv.getContext('2d');
+
+const LOOP=27.0;           /* seconds */
+const GROUND=432, CX=466;  /* contact point of the sack */
+const W=150, H=178;        /* sack base size */
+const GRAV=1800;
+
+/* ============================ helpers ============================ */
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const cl01=v=>clamp(v,0,1);
+const ss=(a,b,x)=>{const u=cl01((x-a)/(b-a));return u*u*(3-2*u);};
+function kf(t,k){
+  if(t<=k[0][0])return k[0][1];
+  for(let i=1;i<k.length;i++){
+    if(t<=k[i][0]){
+      const t0=k[i-1][0],v0=k[i-1][1],t1=k[i][0],v1=k[i][1];
+      const u=(t-t0)/(t1-t0);
+      return v0+(v1-v0)*(u*u*(3-2*u));
+    }
+  }
+  return k[k.length-1][1];
+}
+function spr(s,target,k,d,dt){ s.v+=(target-s.x)*k*dt - s.v*d*dt; s.x+=s.v*dt; }
+
+/* ============================ performance : keyframes ============================
+   Act I  (0.0 - 9.0)   CURIOSITY  : perks up, tilts, peers, little inquisitive hops
+   Act II (9.0 - 18.4)  DEJECTION  : deflates, slumps, sags, heavy sighs, drags away
+   Act III(18.4- 27.0)  ELATION    : snaps up, big bouncing joy, settles back to rest
+   ================================================================================ */
+const K={
+ sq:[ /* squash / stretch of the whole body (height scale) */
+   [0,0.96],[1.0,0.99],[1.35,1.10],[1.7,1.05],[2.2,1.06],[3.0,1.04],[4.0,1.06],
+   [5.0,1.05],[6.6,1.02],[7.4,1.14],[8.2,1.10],[8.7,1.02],
+   [9.5,0.98],[10.0,0.80],[10.8,0.66],[11.6,0.63],[12.3,0.70],[13.0,0.58],
+   [14.0,0.60],[15.3,0.58],[16.2,0.56],[17.4,0.53],[18.4,0.52],
+   [18.65,0.70],[18.95,1.08],[19.15,0.82],[19.35,1.12],[20.5,1.06],[21.5,1.08],
+   [22.5,1.06],[23.3,1.10],[24.5,1.06],[25.3,1.04],[26.0,1.00],[26.6,0.97],[27,0.96]
+ ],
+ ti:[ /* whole-body tilt, degrees (+ = leans right) */
+   [0,0],[1.3,0],[1.5,-3],[1.9,7],[2.6,7],[3.1,-6],[3.7,-6],[4.3,9],[5.0,9],
+   [5.6,2],[6.4,12],[7.2,15],[8.0,13],[8.7,4],
+   [9.6,0],[10.6,-5],[12.0,-6],[13.5,3],[14.6,5],[15.6,-3],[16.6,-4],[17.6,-2],[18.4,-2],
+   [18.9,0],[19.4,-8],[20.0,8],[20.8,-9],[21.6,8],[22.4,-7],[23.2,6],[24.0,-5],
+   [24.8,4],[25.6,-2],[26.4,0],[27,0]
+ ],
+ be:[ /* bend of the body (C curve, + = top leans right) */
+   [0,0],[1.9,0.05],[3.1,-0.04],[4.3,0.06],[6.4,0.10],[7.4,0.16],[8.6,0.06],
+   [10.5,-0.06],[12.5,-0.10],[14.5,0.06],[16.0,0.02],[18.4,0],
+   [19.4,-0.12],[20.2,0.12],[21.0,-0.10],[21.8,0.10],[22.6,-0.08],[23.4,0.08],
+   [24.6,-0.05],[25.6,0.03],[27,0]
+ ],
+ ear:[ /* the two pinched top corners : 0 = up & perked, 1.25 = flopped over */
+   [0,0.40],[1.3,0.38],[1.55,-0.10],[3.0,-0.05],[6.5,0.0],[7.4,-0.12],[8.6,0.15],
+   [9.6,0.50],[10.6,1.15],[12.2,1.05],[13.1,1.25],[15.0,1.20],[18.4,1.25],
+   [18.85,-0.25],[24.0,-0.20],[26.0,0.20],[27,0.40]
+ ],
+ bc:[ /* height of the heaviest part of the mass */
+   [0,0.30],[1.5,0.36],[7.4,0.42],[8.7,0.34],[10.8,0.18],[18.4,0.13],
+   [18.95,0.40],[24.0,0.42],[26.5,0.32],[27,0.30]
+ ],
+ pu:[ /* how much that mass bulges */
+   [0,0.07],[1.5,0.05],[7.4,0.03],[8.7,0.06],[10.8,0.20],[18.4,0.26],
+   [19.0,0.06],[26.5,0.07],[27,0.07]
+ ],
+ wS:[ /* overall width */
+   [0,1.00],[1.5,0.97],[7.4,0.93],[8.7,0.98],[10.8,1.10],[13.0,1.13],[18.4,1.20],
+   [19.0,0.97],[26.5,1.00],[27,1.00]
+ ],
+ x:[ /* horizontal position relative to CX */
+   [0,0],[1.9,10],[2.6,10],[3.1,4],[4.3,26],[5.0,26],[6.4,52],[7.4,66],[8.6,64],
+   [14.2,58],[15.4,30],[16.4,22],[18.4,20],[19.15,20],[20.0,90],[20.9,170],
+   [21.9,250],[22.9,170],[23.8,80],[24.6,20],[25.4,-10],[26.2,0],[27,0]
+ ]
+};
+
+/* jump impulses: [time, upward velocity] */
+const HOPS=[
+  [1.85,320],[3.05,150],[4.25,330],[6.35,300],      /* curious little hops   */
+  [14.55,110],[15.35,95],                          /* heavy dejected shuffle*/
+  [19.15,760],[20.05,700],[20.95,680],[21.90,720],  /* joy                   */
+  [22.90,640],[23.80,520],[24.60,380],[25.30,260],
+  [25.90,170],[26.40,100],[26.80,55]
+];
+
+/* ============================ simulated state ============================ */
+const S={
+  lift:0, vy:0, st:0, wave:0, wavePh:0, bph:0, landN:0,
+  sq:{x:kf(0,K.sq),v:0}, ti:{x:0,v:0}, be:{x:0,v:0},
+  eL:{x:kf(0,K.ear),v:0}, eR:{x:kf(0,K.ear),v:0},
+  wS:{x:kf(0,K.wS),v:0},  bc:{x:kf(0,K.bc),v:0}, pu:{x:kf(0,K.pu),v:0},
+  px:{x:0,v:0}
+};
+
+function hop(v){ if(S.lift<=0.5){ S.vy=v; S.lift=0.02; } }
+function land(impact){
+  S.sq.v -= Math.min(3.2, impact*0.0040);
+  S.wave  = Math.min(0.075, impact*0.00013); S.wavePh=0;
+  S.eL.v -= impact*0.0075; S.eR.v -= impact*0.0075;
+  S.landN++;
+  S.ti.v += impact*0.000045*((S.landN&1)?1:-1);
+}
+
+function step(t,dt){
+  const dej = ss(9.6,11.4,t)*(1-ss(18.2,18.7,t));          /* dejection weight */
+  const Tsq=kf(t,K.sq), Tti=kf(t,K.ti)*Math.PI/180, Tbe=kf(t,K.be),
+        Tear=kf(t,K.ear), Tbc=kf(t,K.bc), Tpu=kf(t,K.pu),
+        TwS=kf(t,K.wS),  Tx=kf(t,K.x);
+
+  if(S.lift>0 || S.vy>0){
+    S.vy -= GRAV*dt; S.lift += S.vy*dt;
+    if(S.lift<=0){ land(Math.abs(S.vy)); S.lift=0; S.vy=0; }
+  }
+
+  spr(S.sq,Tsq,330,17,dt);
+  spr(S.ti,Tti,150,14,dt);
+  spr(S.be,Tbe,110,13,dt);
+  spr(S.wS,TwS, 80,13,dt);
+  spr(S.bc,Tbc, 70,13,dt);
+  spr(S.pu,Tpu, 70,13,dt);
+  spr(S.px,Tx, 120,16,dt);
+
+  /* the two top corners act like floppy cloth: they lag behind the motion */
+  const vxn=clamp(S.px.v/420,-1.2,1.2), vyn=clamp(S.vy/800,-1,1);
+  const eb=Tear+0.50*vyn;
+  spr(S.eR, eb-0.33*vxn, 300,10,dt);
+  spr(S.eL, eb+0.33*vxn, 300,10,dt);
+
+  /* stretch from vertical speed, smoothed a touch */
+  const stT=(S.lift>0?1:0)*0.30*Math.min(1,Math.abs(S.vy)/820);
+  S.st += (stT-S.st)*Math.min(1,dt*35);
+
+  S.wave *= Math.exp(-dt*5.0); S.wavePh += dt*24;
+  S.bph  += dt*(1.7-0.75*dej);                      /* breathing slows when low */
+  S.breathAmp = 0.009+0.020*dej;
+  S.dej=dej;
+}
+
+/* ============================ shape ============================ */
+/* right half silhouette, bottom -> top : [xFrac, yFrac, sharpness] */
+const SIL_LOW=[[0.86,0.00,0.50],[0.99,0.09,0.12],[1.00,0.28,0.0],
+               [0.95,0.48,0.0],[0.84,0.66,0.0],[0.70,0.80,0.08]];
+const SIL_TOP=[[0.30,0.945,0.30],[0.09,0.985,0.10]];
+
+function bodyPoint(fx,fy,p){
+  const g=(c,w)=>Math.exp(-((fy-c)*(fy-c))/(2*w*w));
+  let hw=(W/2)*p.wScale;
+  hw *= 1 + p.puff*g(p.bulgeC,0.17);
+  hw *= 1 - p.pinch*ss(0.45,1.0,fy);
+  hw *= 1 + p.spread*Math.max(0,1-fy/0.18);
+  hw *= 1 + p.wave*Math.sin(fy*8.0 - p.wavePh);
+  const x=fx*hw;
+  let y=fy*H*p.squash;
+  y -= p.sag*H*(1-Math.min(1,fx*fx))*Math.max(0,1-fy*3.5);
+  return {x:x,y:y};
+}
+function warp(b,p){
+  const ny=b.y/H;
+  const x=b.x + p.bend*H*(ny*ny*0.9+ny*0.1);
+  const c=Math.cos(p.tilt), s=Math.sin(p.tilt);
+  return {x:x*c-b.y*s, y:x*s+b.y*c};
+}
+function buildPoints(p){
+  const out=[], ears=[];
+  const bp=(fx,fy,s)=>{const b=bodyPoint(fx,fy,p); out.push({x:b.x,y:b.y,s:s||0});};
+  const EL=36*p.wScale;
+
+  bp(0,0,0);
+  for(let i=0;i<SIL_LOW.length;i++) bp(SIL_LOW[i][0],SIL_LOW[i][1],SIL_LOW[i][2]);
+  const aR=bodyPoint(0.70,0.80,p), angR=(62-p.eR*102)*Math.PI/180;
+  const tR={x:aR.x+Math.cos(angR)*EL, y:aR.y+Math.sin(angR)*EL};
+  out.push({x:tR.x,y:tR.y,s:0.72}); ears.push({a:aR,t:tR});
+  for(let i=0;i<SIL_TOP.length;i++) bp(SIL_TOP[i][0],SIL_TOP[i][1],SIL_TOP[i][2]);
+  bp(0,1.0,0);
+  for(let i=SIL_TOP.length-1;i>=0;i--) bp(-SIL_TOP[i][0],SIL_TOP[i][1],SIL_TOP[i][2]);
+  const aL=bodyPoint(-0.70,0.80,p), angL=(118+p.eL*102)*Math.PI/180;
+  const tL={x:aL.x+Math.cos(angL)*EL, y:aL.y+Math.sin(angL)*EL};
+  out.push({x:tL.x,y:tL.y,s:0.72}); ears.push({a:aL,t:tL});
+  for(let i=SIL_LOW.length-1;i>=0;i--) bp(-SIL_LOW[i][0],SIL_LOW[i][1],SIL_LOW[i][2]);
+
+  return {pts:out, ears:ears};
+}
+function frameTransform(p){
+  const built=buildPoints(p);
+  const wp=built.pts.map(function(q){const w=warp(q,p);return {x:w.x,y:w.y,s:q.s};});
+  let minY=Infinity;
+  for(let i=0;i<wp.length;i++) if(wp[i].y<minY) minY=wp[i].y;
+  const base=GROUND-S.lift+minY, ox=CX+S.px.x;
+  const sp=wp.map(function(q){return {x:ox+q.x,y:base-q.y,s:q.s};});
+  const mapB=function(b){const w=warp(b,p);return {x:ox+w.x,y:base-w.y};};
+  const mapF=function(fx,fy){return mapB(bodyPoint(fx,fy,p));};
+  return {sp:sp, mapB:mapB, mapF:mapF, ears:built.ears};
+}
+function splinePath(P){
+  const n=P.length;
+  ctx.beginPath(); ctx.moveTo(P[0].x,P[0].y);
+  for(let i=0;i<n;i++){
+    const p0=P[(i-1+n)%n],p1=P[i],p2=P[(i+1)%n],p3=P[(i+2)%n];
+    const t1=(1-p1.s)/6, t2=(1-p2.s)/6;
+    ctx.bezierCurveTo(p1.x+(p2.x-p0.x)*t1, p1.y+(p2.y-p0.y)*t1,
+                      p2.x-(p3.x-p1.x)*t2, p2.y-(p3.y-p1.y)*t2, p2.x,p2.y);
+  }
+  ctx.closePath();
+}
+
+/* ============================ props : dust + one drifting speck of light ====== */
+let seed=987654321;
+const rnd=function(){ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; };
+const dust=[];
+for(let i=0;i<26;i++) dust.push({x:rnd()*SW,y:rnd()*SH,r:0.5+rnd()*1.7,
+                                 s:3+rnd()*11,ph:rnd()*6.2832,a:0.04+rnd()*0.11});
+function moteState(t){
+  let a=0;
+  if(t>1.25&&t<9.4)       a=cl01((t-1.25)/0.25)*cl01((9.4-t)/0.55);
+  else if(t>18.3&&t<26.7) a=cl01((t-18.3)/0.12)*cl01((26.7-t)/0.8);
+  let x,y;
+  if(t<13.5){ x=CX+120+46*Math.sin((t-1.3)*0.75)+(t-1.3)*16;
+              y=GROUND-250+34*Math.sin((t-1.3)*1.15+0.8); }
+  else      { x=CX+40+165*Math.sin((t-18.4)*0.75+0.2);
+              y=GROUND-278+48*Math.sin((t-18.4)*1.6); }
+  return {x:x,y:y,a:a};
+}
+
+/* ============================ render ============================ */
+function drawBG(t,dt){
+  const g=ctx.createLinearGradient(0,0,0,SH);
+  g.addColorStop(0,'#171a21'); g.addColorStop(0.70,'#20232a');
+  g.addColorStop(0.795,'#2a2722'); g.addColorStop(1,'#17150f');
+  ctx.fillStyle=g; ctx.fillRect(0,0,SW,SH);
+
+  ctx.save(); ctx.translate(CX+30,GROUND); ctx.scale(1,0.215);
+  const p=ctx.createRadialGradient(0,0,0,0,0,440);
+  p.addColorStop(0,'rgba(255,228,180,0.14)');
+  p.addColorStop(0.55,'rgba(255,220,170,0.05)');
+  p.addColorStop(1,'rgba(255,210,160,0)');
+  ctx.fillStyle=p; ctx.beginPath(); ctx.arc(0,0,440,0,6.2832); ctx.fill(); ctx.restore();
+
+  ctx.strokeStyle='rgba(255,235,205,0.05)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,GROUND+0.5); ctx.lineTo(SW,GROUND+0.5); ctx.stroke();
+
+  for(let i=0;i<dust.length;i++){
+    const d=dust[i];
+    d.y-=d.s*dt*0.30; d.ph+=dt*0.5;
+    if(d.y<-6){ d.y=SH+6; d.x=rnd()*SW; }
+    const x=d.x+Math.sin(d.ph)*12;
+    ctx.fillStyle='rgba(255,240,215,'+d.a.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(x,d.y,d.r,0,6.2832); ctx.fill();
+  }
+}
+
+function drawShadow(F){
+  let minX=Infinity,maxX=-Infinity;
+  for(let i=0;i<F.sp.length;i++){ const q=F.sp[i]; if(q.x<minX)minX=q.x; if(q.x>maxX)maxX=q.x; }
+  const h=cl01(S.lift/190);
+  const rx=(maxX-minX)*0.60*(1-0.32*h)+14, ry=rx*0.20;
+  const cx=(minX+maxX)/2 + S.be.x*10;
+  const a=0.46*(1-0.62*h);
+  ctx.save(); ctx.translate(cx,GROUND+2); ctx.scale(1,ry/rx);
+  const g=ctx.createRadialGradient(0,0,0,0,0,rx);
+  g.addColorStop(0,'rgba(8,7,6,'+a.toFixed(3)+')');
+  g.addColorStop(0.55,'rgba(8,7,6,'+(a*0.52).toFixed(3)+')');
+  g.addColorStop(1,'rgba(8,7,6,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,rx,0,6.2832); ctx.fill(); ctx.restore();
+}
+
+const CREASES=[
+ [[-0.90,0.21],[-0.35,0.33],[0.16,0.26]],
+ [[ 0.92,0.40],[ 0.40,0.52],[-0.10,0.44]],
+ [[-0.82,0.61],[-0.24,0.71],[0.36,0.61]],
+ [[ 0.58,0.13],[ 0.22,0.23]],
+ [[-0.55,0.86],[-0.12,0.90]]
+];
+
+function drawSack(p,F){
+  const P=F.sp;
+  let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+  for(let i=0;i<P.length;i++){const q=P[i];
+    if(q.x<minX)minX=q.x; if(q.x>maxX)maxX=q.x;
+    if(q.y<minY)minY=q.y; if(q.y>maxY)maxY=q.y;}
+
+  splinePath(P);
+  ctx.save(); ctx.clip();
+
+  const g=ctx.createLinearGradient(0,minY,0,maxY);
+  g.addColorStop(0,'#f2e9d4'); g.addColorStop(0.40,'#e4d8ba');
+  g.addColorStop(0.80,'#c3b494'); g.addColorStop(1,'#9d8e72');
+  ctx.fillStyle=g; ctx.fillRect(minX-40,minY-40,(maxX-minX)+80,(maxY-minY)+80);
+
+  /* key light, upper left */
+  const hx=minX+(maxX-minX)*0.32, hy=minY+(maxY-minY)*0.26, hr=(maxX-minX)*0.82;
+  const hg=ctx.createRadialGradient(hx,hy,0,hx,hy,hr);
+  hg.addColorStop(0,'rgba(255,252,240,0.50)');
+  hg.addColorStop(0.5,'rgba(255,248,230,0.14)');
+  hg.addColorStop(1,'rgba(255,245,225,0)');
+  ctx.fillStyle=hg; ctx.fillRect(minX-40,minY-40,(maxX-minX)+80,(maxY-minY)+80);
+
+  /* contact shade */
+  const cgx=(minX+maxX)/2;
+  const cg=ctx.createRadialGradient(cgx,maxY+8,4,cgx,maxY+8,(maxX-minX)*0.75);
+  cg.addColorStop(0,'rgba(60,48,36,0.46)');
+  cg.addColorStop(1,'rgba(60,48,36,0)');
+  ctx.fillStyle=cg; ctx.fillRect(minX-40,minY-40,(maxX-minX)+80,(maxY-minY)+80);
+
+  /* woven band */
+  ctx.beginPath();
+  for(let i=0;i<=10;i++){
+    const fx=-1.12+ (2.24*i/10);
+    const q=F.mapF(fx, 0.315-0.020*(1-fx*fx));
+    if(i===0) ctx.moveTo(q.x,q.y); else ctx.lineTo(q.x,q.y);
+  }
+  for(let i=10;i>=0;i--){
+    const fx=-1.12+ (2.24*i/10);
+    const q=F.mapF(fx, 0.385-0.020*(1-fx*fx));
+    ctx.lineTo(q.x,q.y);
+  }
+  ctx.closePath();
+  ctx.fillStyle='rgba(96,110,132,0.17)'; ctx.fill();
+  ctx.strokeStyle='rgba(80,92,112,0.16)'; ctx.lineWidth=1.2; ctx.stroke();
+
+  /* creases (more of them when the sack is collapsed) */
+  const ca=0.09+0.24*cl01((1.02-p.squash)*1.5);
+  ctx.strokeStyle='rgba(120,104,80,'+ca.toFixed(3)+')';
+  ctx.lineWidth=1.5; ctx.lineCap='round';
+  for(let c=0;c<CREASES.length;c++){
+    const L=CREASES[c];
+    ctx.beginPath();
+    for(let i=0;i<L.length;i++){
+      const q=F.mapF(L[i][0],L[i][1]);
+      if(i===0) ctx.moveTo(q.x,q.y); else ctx.lineTo(q.x,q.y);
+    }
+    ctx.stroke();
+  }
+
+  /* top seam stitching */
+  ctx.setLineDash([4,5]);
+  ctx.strokeStyle='rgba(122,106,82,0.42)'; ctx.lineWidth=1.4;
+  ctx.beginPath();
+  for(let i=0;i<=12;i++){
+    const fx=-0.31+0.62*i/12;
+    const q=F.mapF(fx, 0.958+0.026*(1-(fx/0.31)*(fx/0.31)));
+    if(i===0) ctx.moveTo(q.x,q.y); else ctx.lineTo(q.x,q.y);
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+
+  /* folds at the two pinched corners */
+  ctx.strokeStyle='rgba(120,104,80,0.30)'; ctx.lineWidth=1.3;
+  for(let e=0;e<F.ears.length;e++){
+    const ea=F.ears[e];
+    const a=F.mapB(ea.a);
+    const m=F.mapB({x:ea.a.x+(ea.t.x-ea.a.x)*0.72, y:ea.a.y+(ea.t.y-ea.a.y)*0.72});
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(m.x,m.y); ctx.stroke();
+  }
+  ctx.restore();
+
+  /* outline + rim light */
+  splinePath(P);
+  ctx.strokeStyle='rgba(58,46,34,0.55)'; ctx.lineWidth=1.6; ctx.stroke();
+  ctx.save(); splinePath(P); ctx.clip();
+  splinePath(P);
+  ctx.strokeStyle='rgba(255,250,235,0.30)'; ctx.lineWidth=2.6;
+  ctx.setLineDash([]); ctx.stroke(); ctx.restore();
+}
+
+function drawMote(t){
+  const m=moteState(t);
+  if(m.a<=0.002) return;
+  const g=ctx.createRadialGradient(m.x,m.y,0,m.x,m.y,30);
+  g.addColorStop(0,'rgba(255,250,228,'+(0.85*m.a).toFixed(3)+')');
+  g.addColorStop(0.16,'rgba(255,228,168,'+(0.42*m.a).toFixed(3)+')');
+  g.addColorStop(1,'rgba(255,205,130,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(m.x,m.y,30,0,6.2832); ctx.fill();
+  ctx.fillStyle='rgba(255,253,244,'+(0.92*m.a).toFixed(3)+')';
+  ctx.beginPath(); ctx.arc(m.x,m.y,2.1,0,6.2832); ctx.fill();
+}
+
+function drawVignette(){
+  const v=ctx.createRadialGradient(480,275,130,480,275,650);
+  v.addColorStop(0,'rgba(0,0,0,0)'); v.addColorStop(0.68,'rgba(0,0,0,0.18)');
+  v.addColorStop(1,'rgba(0,0,0,0.58)');
+  ctx.fillStyle=v; ctx.fillRect(0,0,SW,SH);
+}
+
+function render(t,dt){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  drawBG(t,dt);
+
+  const p={
+    squash: S.sq.x + S.st + (S.breathAmp||0.01)*Math.sin(S.bph),
+    wScale: S.wS.x*(1-0.50*S.st),
+    bulgeC: S.bc.x, puff:S.pu.x,
+    bend:   S.be.x,
+    tilt:   S.ti.x + 0.011*Math.sin(S.bph*0.63)*(S.dej||0),
+    sag:    0.055*cl01(S.lift/70),
+    wave:   S.wave, wavePh:S.wavePh,
+    eL:S.eL.x, eR:S.eR.x, pinch:0, spread:0
+  };
+  p.pinch  = clamp((1.02-p.squash)*0.42,0,0.30);
+  p.spread = clamp((1.00-p.squash)*0.32,0,0.20)*(1-cl01(S.lift/50));
+
+  const F=frameTransform(p);
+  drawShadow(F);
+  drawSack(p,F);
+  drawMote(t);
+  drawVignette();
+}
+
+/* ============================ clock ============================ */
+let T=0, prev=performance.now(), acc=0;
+const DT=1/120;
+function events(a,b){
+  const wrap=b<a;
+  for(let i=0;i<HOPS.length;i++){
+    const ht=HOPS[i][0];
+    const hit = wrap ? (ht>a || ht<=b) : (ht>a && ht<=b);
+    if(hit) hop(HOPS[i][1]);
+  }
+}
+/* settle the simulation into the opening pose */
+for(let i=0;i<180;i++) step(0,DT);
+
+function frame(now){
+  let dt=(now-prev)/1000; prev=now;
+  if(dt>0.25) dt=0.25;
+  acc+=dt;
+  let guard=0;
+  while(acc>=DT && guard++<40){
+    const pt=T; T=(T+DT)%LOOP;
+    events(pt,T); step(T,DT);
+    acc-=DT;
+  }
+  render(T,dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

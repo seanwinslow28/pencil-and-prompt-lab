@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#141210;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+canvas{width:960px;height:540px;display:block}
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<script>
+(function(){
+const W=960,H=540,T=24,S=170,FLOOR=440;
+const cv=document.getElementById('stage');
+const dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+cv.width=W*dpr;cv.height=H*dpr;
+const ctx=cv.getContext('2d');
+ctx.setTransform(dpr,0,0,dpr,0,0);
+
+/* ---------- easing + keyframe tracks ---------- */
+const E={
+ io:u=>u<.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2,
+ out:u=>1-Math.pow(1-u,3),
+ in:u=>u*u*u,
+ lin:u=>u,
+ snap:u=>u<1?0:1,
+ back:u=>{const c=1.70158,d=c+1;return 1+d*Math.pow(u-1,3)+c*Math.pow(u-1,2);}
+};
+const tracks={};
+function key(n,t,v,e){(tracks[n]||(tracks[n]=[])).push({t:t,v:v,e:e||'io'});}
+function val(n,t){
+ const k=tracks[n];let a=k[0],b=null;
+ for(let i=0;i<k.length;i++){if(k[i].t<=t){a=k[i];b=k[i+1]||null;}else break;}
+ if(!b)return a.v;
+ const u=(t-a.t)/(b.t-a.t);
+ return a.v+(b.v-a.v)*E[b.e](u);
+}
+
+/* ---------- procedural hops (anticipation / air / landing) ---------- */
+const hops=[];let cx=0;
+function hop(t0,dur,h,dx,o){
+ o=o||{};
+ hops.push({t0:t0,dur:dur,h:h,dx:dx,pre:o.pre||.16,post:o.post||.28,sq:o.sq||1});
+ key('x',t0,cx,'io');key('x',t0+dur,cx+dx,o.ease||'lin');cx+=dx;
+}
+function hopContrib(t){
+ const o={lift:0,sy:1,ear:0,lean:0};
+ for(const h of hops){
+  if(t<h.t0-h.pre||t>h.t0+h.dur+h.post)continue;
+  const amp=Math.min(1,h.h/60);
+  if(t<h.t0){
+   const s=E.in((t-(h.t0-h.pre))/h.pre);
+   o.sy*=1-(0.2*amp+0.05)*s*h.sq;o.ear+=0.25*amp*s;
+  }else if(t<h.t0+h.dur){
+   const u=(t-h.t0)/h.dur,v=1-2*u;
+   o.lift+=h.h*4*u*(1-u);
+   o.sy*=1+0.28*amp*Math.abs(v)+0.05;
+   o.ear+=-0.5*amp*v;
+   o.lean+=-Math.sign(h.dx)*0.12*amp*Math.sin(Math.PI*u);
+  }else{
+   const p=(t-h.t0-h.dur)/h.post,q=1-p;
+   o.sy*=1-(0.3*amp+0.06)*h.sq*q*q;
+   o.ear+=0.5*amp*Math.cos(1.5*Math.PI*p)*(1-0.3*p);
+  }
+ }
+ return o;
+}
+
+/* ---------- timeline ---------- */
+const REST={sx:1.1,sy:.86,bend:-.2,sag:.15,earL:-1.5,earR:-1.5,rot:0,spin:0,tremble:0,x:0,belly:.08};
+for(const k in REST){key(k,0,REST[k]);key(k,T,REST[k]);}
+
+/* JOY (0-8): wakes, perks up, bounces around, big flip, happy shimmy */
+key('sy',.55,.86);key('sy',.8,.78,'in');key('sy',1.15,1.1,'back');key('sy',1.5,1);
+key('sx',.55,1.1);key('sx',.8,1.18,'in');key('sx',1.15,.94,'back');key('sx',1.5,1);
+key('bend',.55,-.2);key('bend',1.15,.05,'back');key('bend',1.5,0);
+key('sag',.55,.15);key('sag',1.15,0);
+key('belly',.55,.08);key('belly',1.15,0);
+key('earL',.6,-1.5);key('earL',1.25,.5,'back');
+key('earR',.7,-1.5);key('earR',1.35,.5,'back');
+key('rot',1.5,0);key('rot',1.75,.1);key('rot',2.0,-.1);key('rot',2.2,0);
+hop(2.35,.45,55,0);
+hop(3.15,.45,65,90);
+hop(3.95,.45,65,90);
+hop(4.85,.75,140,-180);
+key('spin',4.85,0);key('spin',5.6,Math.PI*2,'io');key('spin',5.62,0,'snap');
+hop(6.05,.4,50,-80);
+hop(6.9,.4,50,80);
+key('rot',7.58,0);key('rot',7.7,.08);key('rot',7.82,-.08);key('rot',7.94,0);
+key('earL',7.58,.5);key('earL',7.7,.25);key('earL',7.82,.7);key('earL',7.94,.5);
+key('earR',7.58,.5);key('earR',7.7,.7);key('earR',7.82,.25);key('earR',7.94,.5);
+
+/* FEAR (8-15): startle, cower, tremble, back away, peek, slowly relax, relieved sigh */
+hop(8.0,.3,75,-35,{pre:.05,post:.3});
+key('earL',8.04,.8,'out');key('earR',8.04,.8,'out');
+key('sx',7.94,1);key('sx',8.08,.86,'out');
+key('sy',8.3,1);key('sy',8.75,.7,'out');
+key('sx',8.3,.86);key('sx',8.75,1.25,'out');
+key('bend',8.3,0);key('bend',8.8,-.32,'out');
+key('rot',8.3,0);key('rot',8.8,.1,'out');
+key('earL',8.35,.8);key('earL',8.9,.3);
+key('earR',8.35,.8);key('earR',8.9,-1.5);
+key('tremble',8.3,0);key('tremble',8.8,1);
+key('belly',8.3,0);key('belly',8.8,.1);
+[9.3,9.55,9.8,10.35,10.6,11.7,11.95].forEach(t=>hop(t,.14,9,-30,{pre:.06,post:.12}));
+key('bend',10.85,-.32);key('bend',11.1,-.05);key('bend',11.35,-.4,'out');key('bend',11.6,-.32);
+key('sy',10.85,.7);key('sy',11.1,.82);key('sy',11.35,.64,'out');key('sy',11.6,.7);
+key('sx',10.85,1.25);key('sx',11.1,1.12);key('sx',11.35,1.32,'out');key('sx',11.6,1.25);
+key('earR',10.85,-1.5);key('earR',11.1,-.7);key('earR',11.35,-1.6,'out');key('earR',11.6,-1.5);
+key('earL',10.85,.3);key('earL',11.1,.5);key('earL',11.35,.2,'out');key('earL',11.6,.3);
+key('tremble',12.3,1);key('tremble',13.9,.12);key('tremble',14.6,0);
+key('sy',12.3,.7);key('sy',13.9,.96);
+key('sx',12.3,1.25);key('sx',13.9,1.02);
+key('bend',12.3,-.32);key('bend',13.9,.06);
+key('rot',12.3,.1);key('rot',13.9,-.03);
+key('earL',12.3,.3);key('earL',13.9,.2);
+key('earR',12.3,-1.5);key('earR',13.9,-.2);
+key('belly',12.3,.1);key('belly',13.9,0);
+key('sy',14.4,1.06);key('sy',15.1,.86,'out');key('sy',15.3,.9);key('sy',16.3,.84);
+key('sx',14.4,.98);key('sx',15.1,1.1,'out');key('sx',15.3,1.08);key('sx',16.3,1.11);
+key('earL',14.4,.45);key('earL',15.1,-1.3,'in');key('earL',15.3,-1.15,'out');key('earL',16.4,-1.5);
+key('earR',14.45,.45);key('earR',15.15,-1.3,'in');key('earR',15.35,-1.15,'out');key('earR',16.5,-1.5);
+key('bend',14.4,.1);key('bend',15.1,-.15,'in');key('bend',16.4,-.28);
+key('rot',14.4,0);key('rot',16.4,0);
+key('sag',14.4,0);key('sag',16.4,.2);
+key('belly',14.4,0);key('belly',16.4,.1);
+
+/* SADNESS (15-24): slump, heavy dragging shuffle home, long sigh, settle */
+[17.0,18.05,19.1,20.15,21.2].forEach(t=>hop(t,.6,14,49,{pre:.22,post:.38,sq:1.8,ease:'io'}));
+key('sy',22.3,.84);key('sy',23.0,.97);key('sy',23.45,.82,'out');key('sy',23.8,.86);
+key('sx',22.3,1.11);key('sx',23.0,1.02);key('sx',23.45,1.13,'out');key('sx',23.8,1.1);
+key('earL',22.3,-1.5);key('earL',23.0,-1.0);key('earL',23.5,-1.55,'in');key('earL',23.8,-1.5,'out');
+key('earR',22.35,-1.5);key('earR',23.05,-1.0);key('earR',23.55,-1.55,'in');key('earR',23.85,-1.5,'out');
+key('bend',22.3,-.28);key('bend',23.0,-.12);key('bend',23.5,-.3,'in');key('bend',23.8,-.2);
+key('sag',22.3,.2);key('sag',23.0,.08);key('sag',23.5,.2,'in');key('sag',23.8,.15);
+key('belly',22.3,.1);key('belly',23.8,.08);
+
+for(const k in tracks)tracks[k].sort((a,b)=>a.t-b.t);
+
+/* ---------- sack geometry (units, origin at base centre, y up) ---------- */
+const OUT=[
+ [-0.36,0.0],[0,-0.01],[0.36,0.0],
+ [0.5,0.14],[0.52,0.4],[0.46,0.68],[0.36,0.92],
+ [0.22,1.04],
+ [0.29,1.13,'R'],[0.4,1.3,'R'],[0.44,1.44,'R'],[0.32,1.4,'R'],[0.2,1.2,'R'],
+ [0.07,1.14],[0,1.12],[-0.07,1.14],
+ [-0.2,1.2,'L'],[-0.32,1.4,'L'],[-0.44,1.44,'L'],[-0.4,1.3,'L'],[-0.29,1.13,'L'],
+ [-0.22,1.04],
+ [-0.36,0.92],[-0.46,0.68],[-0.52,0.4],[-0.5,0.14]
+];
+const FOLDS=[
+ [[-0.38,0.24],[-0.27,0.48],[-0.33,0.74]],
+ [[0.3,0.2],[0.22,0.46]],
+ [[-0.28,0.1],[0,0.15],[0.28,0.1]],
+ [[-0.1,0.55],[-0.02,0.78],[0.06,0.96]]
+];
+const NECK=[[-0.22,1.03],[0,0.99],[0.22,1.03]];
+
+function pose(t){
+ const p={};for(const k in tracks)p[k]=val(k,t);
+ const h=hopContrib(t);
+ p.lift=h.lift;p.sy*=h.sy;p.sx/=Math.sqrt(h.sy);
+ p.earL+=h.ear;p.earR+=h.ear;p.rot+=h.lean;
+ const b=1+0.012*Math.sin(t*Math.PI);p.sy*=b;p.sx/=Math.sqrt(b);
+ const tr=p.tremble;
+ p.jx=tr*2.4*(Math.sin(t*61)+.6*Math.sin(t*97));
+ p.rot+=tr*.02*Math.sin(t*73);
+ p.earL+=tr*.12*Math.sin(t*89);p.earR+=tr*.12*Math.sin(t*79+1);
+ p.sy*=1+tr*.015*Math.sin(t*67);
+ return p;
+}
+
+function xf(p,pt){
+ let x=pt[0],y=pt[1];const tag=pt[2];
+ if(tag){
+  const s=tag==='L'?-1:1,px=0.24*s,py=1.06,a=tag==='L'?-p.earL:p.earR;
+  const dx=x-px,dy=y-py,c=Math.cos(a),sn=Math.sin(a);
+  x=px+dx*c-dy*sn;y=py+dx*sn+dy*c;
+ }
+ const yb=Math.min(Math.max(y,0),1.06);
+ x*=1+p.belly*Math.sin(Math.PI*yb/1.06);
+ x+=p.bend*yb*yb;y-=p.sag*yb*yb;
+ x*=p.sx;y*=p.sy;
+ if(p.spin){const cy=0.6*p.sy,dy=y-cy,c=Math.cos(p.spin),s=Math.sin(p.spin);const nx=x*c-dy*s,ny=x*s+dy*c;x=nx;y=cy+ny;}
+ if(p.rot){const c=Math.cos(p.rot),s=Math.sin(p.rot);const nx=x*c-y*s,ny=x*s+y*c;x=nx;y=ny;}
+ return [W/2+p.x+p.jx+x*S,FLOOR-p.lift-y*S];
+}
+
+function path(pts,closed){
+ const n=pts.length;ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);
+ const m=closed?n:n-1;
+ for(let i=0;i<m;i++){
+  const p0=pts[closed?(i-1+n)%n:Math.max(i-1,0)],p1=pts[i],p2=pts[(i+1)%n],p3=pts[closed?(i+2)%n:Math.min(i+2,n-1)];
+  ctx.bezierCurveTo(p1[0]+(p2[0]-p0[0])/6,p1[1]+(p2[1]-p0[1])/6,p2[0]-(p3[0]-p1[0])/6,p2[1]-(p3[1]-p1[1])/6,p2[0],p2[1]);
+ }
+ if(closed)ctx.closePath();
+}
+
+function drawStage(){
+ ctx.fillStyle='#ebe4d5';ctx.fillRect(0,0,W,H);
+ const g=ctx.createLinearGradient(0,370,0,H);
+ g.addColorStop(0,'#d6c9b0');g.addColorStop(1,'#bdac8e');
+ ctx.fillStyle=g;ctx.fillRect(0,370,W,H-370);
+ ctx.fillStyle='rgba(90,70,50,0.12)';ctx.fillRect(0,370,W,1.5);
+}
+
+function drawSack(p){
+ const pts=OUT.map(q=>xf(p,q));
+ const bx=W/2+p.x+p.jx,sa=Math.max(0,1-p.lift/260);
+ ctx.fillStyle='rgba(40,30,20,'+(0.22*sa).toFixed(3)+')';
+ ctx.beginPath();ctx.ellipse(bx,FLOOR+3,S*0.5*p.sx*(0.6+0.4*sa),9*(0.7+0.3*sa),0,0,Math.PI*2);ctx.fill();
+ const c=xf(p,[-0.12,0.62]);
+ const g=ctx.createRadialGradient(c[0]-20,c[1]-20,10,c[0],c[1],S*1.25);
+ g.addColorStop(0,'#f8f1e1');g.addColorStop(.55,'#e2d3b1');g.addColorStop(1,'#bfa77f');
+ path(pts,true);ctx.fillStyle=g;ctx.fill();
+ ctx.lineCap='round';ctx.lineJoin='round';
+ ctx.strokeStyle='rgba(74,58,42,0.28)';ctx.lineWidth=2;
+ FOLDS.forEach(f=>{path(f.map(q=>xf(p,q)),false);ctx.stroke();});
+ ctx.strokeStyle='#4a3a2a';ctx.lineWidth=3.2;
+ path(NECK.map(q=>xf(p,q)),false);ctx.stroke();
+ const k=xf(p,[0,1.06]);ctx.fillStyle='#4a3a2a';ctx.beginPath();ctx.arc(k[0],k[1],4.5,0,Math.PI*2);ctx.fill();
+ path(pts,true);ctx.stroke();
+}
+
+let start=null;
+function frame(now){
+ if(start===null)start=now;
+ const t=((now-start)/1000)%T;
+ drawStage();
+ drawSack(pose(t));
+ requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

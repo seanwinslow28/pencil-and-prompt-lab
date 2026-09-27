@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; background: #1f1d1b; }
+  body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  canvas { display: block; width: 960px; height: 540px; box-shadow: 0 12px 44px rgba(0,0,0,0.55); }
+</style>
+</head>
+<body>
+<canvas id="stage" width="960" height="540"></canvas>
+<script>
+(function () {
+  "use strict";
+
+  const cv = document.getElementById("stage");
+  const ctx = cv.getContext("2d");
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = 960 * dpr;
+  cv.height = 540 * dpr;
+
+  const G = 440;   // ground line
+  const T = 28;    // loop length in seconds
+
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const lerp = (a, b, p) => a + (b - a) * p;
+
+  const EZ = {
+    lin: p => p,
+    io: p => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2),
+    out: p => 1 - Math.pow(1 - p, 3),
+    in: p => p * p * p
+  };
+
+  // ---------- keyframe tracks ----------
+  const tr = {};
+  function K(name, list) {
+    tr[name] = (tr[name] || []).concat(list.map(k => [k[0], k[1], k[2] || "io"]));
+  }
+  function ev(name, t) {
+    const k = tr[name];
+    if (t <= k[0][0]) return k[0][1];
+    for (let i = 1; i < k.length; i++) {
+      if (t < k[i][0]) {
+        const a = k[i - 1], b = k[i];
+        const p = (t - a[0]) / (b[0] - a[0]);
+        return lerp(a[1], b[1], EZ[b[2]](p));
+      }
+    }
+    return k[k.length - 1][1];
+  }
+
+  // ---------- hops ----------
+  const hops = [
+    // JOY
+    { t0: 1.70, ant: 0.30, air: 0.50, rec: 0.30, h: 70,  x0: 480, x1: 570, sqz: 0.25 },
+    { t0: 2.80, ant: 0.16, air: 0.55, rec: 0.28, h: 95,  x0: 570, x1: 680, sqz: 0.22 },
+    { t0: 3.79, ant: 0.18, air: 0.50, rec: 0.30, h: 75,  x0: 680, x1: 590, sqz: 0.22 },
+    { t0: 4.85, ant: 0.45, air: 1.00, rec: 0.50, h: 190, x0: 590, x1: 450, sqz: 0.38, spin: -1 },
+    // FEAR
+    { t0: 17.25, ant: 0.05, air: 0.34, rec: 0.25, h: 38, x0: 335, x1: 375, sqz: 0.08 },
+    { t0: 21.95, ant: 0.05, air: 0.30, rec: 0.08, h: 30, x0: 430, x1: 500, sqz: 0.10 },
+    { t0: 22.38, ant: 0.05, air: 0.30, rec: 0.08, h: 30, x0: 500, x1: 570, sqz: 0.10 },
+    { t0: 22.81, ant: 0.05, air: 0.32, rec: 0.30, h: 32, x0: 570, x1: 640, sqz: 0.12 },
+    // back home
+    { t0: 26.30, ant: 0.28, air: 0.48, rec: 0.35, h: 45, x0: 640, x1: 480, sqz: 0.20 }
+  ];
+
+  K("x", [[0,480],[12.5,450],[13.1,410],[13.4,410],[14.0,372],[14.4,372],[15.1,335],
+          [18.55,375],[18.75,395],[18.9,395],[19.1,418],[19.25,418],[19.45,440],
+          [20.6,440],[21.8,430],[28,480]]);
+  for (const h of hops) {
+    K("x", [[h.t0 + h.ant, h.x0, "io"], [h.t0 + h.ant + h.air, h.x1, "lin"]]);
+  }
+
+  K("lean", [[0,0],[10.5,0],[12.2,-6],[12.5,-6],[12.8,-14],[13.1,-6],[13.4,-6],[13.7,-14],
+             [14.0,-6],[14.4,-6],[14.75,-16],[15.1,-6],[15.9,-4],[16.7,-8],[17.25,-8],
+             [17.4,16,"out"],[18.5,16],[19.3,26],[20.6,26],[21.8,-14],[21.95,30,"out"],
+             [24.6,30],[25.6,0],[28,0]]);
+
+  K("bend", [[0,0],[10.5,0],[12.2,-28],[15.9,-28],[16.7,-36],[17.25,-36],[17.4,10,"out"],
+             [18.5,10],[19.3,18],[20.6,18],[21.8,-10],[21.95,22,"out"],[24.6,22],[25.6,0],[28,0]]);
+
+  K("slump", [[0,0],[10.5,0],[12.2,0.75],[15.9,0.75],[16.7,0.9],[17.25,0.9],[17.36,0,"out"],[28,0]]);
+
+  K("ear", [[0,0],[1.2,0],[1.55,0.85,"out"],[8.6,0.85],[9.4,0.3],[10.6,0.3],[12.4,-0.95],
+            [17.25,-0.95],[17.33,1.1,"out"],[18.5,1.0],[19.3,-0.35],[20.6,-0.35],[21.8,0.45],
+            [21.95,-0.2,"out"],[23.3,-0.5],[24.6,-0.5],[25.6,0.2],[26.3,0.1],[27.4,0],[28,0]]);
+
+  K("tilt", [[0,0],[10.6,0],[12.4,-0.15],[17.25,-0.15],[17.35,0,"out"],[28,0]]);
+
+  K("sq", [[0,1],[1.2,1],[1.45,1.07,"out"],[1.65,1],[8.6,1],[9.0,1.04],[9.4,0.98],[9.8,1],
+           [10.0,1],[10.3,1.03],[10.5,1.03],[12.2,0.86],[12.5,0.86],[12.8,0.83],[13.1,0.86],
+           [13.4,0.86],[13.7,0.83],[14.0,0.86],[14.4,0.86],[14.75,0.82],[15.1,0.86],[15.3,0.86],
+           [15.95,0.94],[16.75,0.78,"out"],[17.25,0.78],[17.4,1.14,"out"],[18.5,1.12],[19.3,0.8],
+           [20.6,0.8],[21.8,0.97],[21.95,1.15,"out"],[22.1,1.0],[23.18,1.0],[23.5,0.76],
+           [24.6,0.76],[25.0,0.78],[25.6,1.05],[26.1,0.95,"out"],[26.3,1],[28,1]]);
+
+  K("trem", [[0,0],[17.3,0],[17.7,1.6],[18.5,1.8],[19.3,3.2],[20.6,3.2],[21.3,1.0],[21.8,0.8],
+             [21.9,0],[23.2,0],[23.45,4.0],[24.6,4.0],[25.0,0],[28,0]]);
+
+  K("brA", [[0,1],[10.5,1],[12.2,0.6],[17.25,0.6],[17.5,0.3],[19.3,1.4],[20.6,1.4],[21.2,0.2],
+            [21.9,0.2],[23.4,1.5],[24.6,1.5],[25.4,1],[28,1]]);
+
+  K("brR", [[0,0.4],[1.2,0.4],[1.6,1.0],[8.6,1.0],[9.4,0.4],[12.2,0.25],[17.25,0.25],[17.5,1.5],
+            [19.3,2.6],[20.6,2.6],[21.2,0.8],[23.4,2.8],[24.6,2.8],[25.6,0.4],[28,0.4]]);
+
+  for (const n in tr) tr[n].sort((a, b) => a[0] - b[0]);
+
+  // ---------- breathing phase (integrated, loop-closed) ----------
+  const BR_DT = 0.005;
+  const BR_N = Math.ceil(T / BR_DT) + 2;
+  const brPh = new Float64Array(BR_N + 1);
+  for (let i = 0; i < BR_N; i++) {
+    brPh[i + 1] = brPh[i] + 2 * Math.PI * ev("brR", i * BR_DT) * BR_DT;
+  }
+  (function closeLoop() {
+    const iT = T / BR_DT;
+    const total = lerp(brPh[Math.floor(iT)], brPh[Math.floor(iT) + 1], iT - Math.floor(iT));
+    const cycles = Math.max(1, Math.round(total / (2 * Math.PI)));
+    const s = (cycles * 2 * Math.PI) / total;
+    for (let i = 0; i <= BR_N; i++) brPh[i] *= s;
+  })();
+  function brPhase(t) {
+    const f = t / BR_DT, i = Math.floor(f);
+    return lerp(brPh[i], brPh[i + 1], f - i);
+  }
+
+  // ---------- procedural overlays ----------
+  function hopFx(h, t) {
+    const tl = t - h.t0, A = h.ant, R = h.air, C = h.rec;
+    if (tl < 0 || tl > A + R + C) return null;
+    const str = 0.12 + h.h / 1200;
+    const land = 0.1 + h.h / 800;
+    if (tl < A) return { y: 0, sq: 1 - h.sqz * EZ.io(tl / A), rot: 0 };
+    if (tl < A + R) {
+      const p = (tl - A) / R;
+      const s = 1 + str * Math.pow(1 - 2 * p, 2);
+      const b = clamp(p / 0.12, 0, 1);
+      const bb = b * b * (3 - 2 * b);
+      return {
+        y: h.h * 4 * p * (1 - p),
+        sq: lerp(1 - h.sqz, s, bb),
+        rot: (h.spin || 0) * 2 * Math.PI * EZ.io(p)
+      };
+    }
+    const p = (tl - A - R) / C;
+    return { y: 0, sq: 1 - land * (1 - p) * Math.exp(-3 * p) * Math.cos(2.5 * Math.PI * p), rot: 0 };
+  }
+
+  function wiggle(t) {
+    const t0 = 6.85, d = 1.65, tl = t - t0;
+    if (tl < 0 || tl > d) return null;
+    const p = tl / d;
+    const env = Math.pow(Math.sin(Math.PI * p), 0.7);
+    const ph = 2 * Math.PI * 1.8 * tl;
+    const s = Math.sin(ph), c = Math.cos(ph);
+    return { lean: 26 * s * env, y: 11 * Math.abs(c) * env, sq: 1 - 0.07 * s * s * env, tilt: 0.5 * s * env };
+  }
+
+  // ---------- pose (pure function of time) ----------
+  function pose(tIn) {
+    const t = ((tIn % T) + T) % T;
+    const x = ev("x", t);
+    let lean = ev("lean", t);
+    const bend = ev("bend", t), slump = ev("slump", t), ear = ev("ear", t);
+    let tilt = ev("tilt", t), sq = ev("sq", t);
+    const trem = ev("trem", t), brA = ev("brA", t);
+    let y = 0, rot = 0;
+    for (const h of hops) {
+      const r = hopFx(h, t);
+      if (r) { y += r.y; sq *= r.sq; rot += r.rot; }
+    }
+    const w = wiggle(t);
+    if (w) { y += w.y; sq *= w.sq; lean += w.lean; tilt += w.tilt; }
+    const leanBase = lean;
+    sq *= 1 + 0.014 * brA * Math.sin(brPhase(t));
+    const tx = trem * (0.6 * Math.sin(t * 97) + 0.4 * Math.sin(t * 151.3));
+    sq *= 1 + trem * 0.006 * Math.sin(t * 113);
+    lean += trem * 1.1 * Math.sin(t * 71 + 1);
+    return { t, x, tx, y, rot, lean, leanBase, bend, slump, ear, tilt, sq, trem };
+  }
+
+  // ---------- secondary motion + particles ----------
+  const H = 1 / 120;
+  let simT = 0;
+  const S = { eL: 0, vL: 0, eR: 0, vR: 0, w: 0, vw: 0 };
+  const parts = [];
+
+  function puff(x, h) {
+    const n = Math.round(8 + h / 10);
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 ? 1 : -1;
+      parts.push({
+        x: x + side * (28 + Math.random() * 26),
+        y: G - 2 - Math.random() * 6,
+        vx: side * (40 + Math.random() * 120) * (0.5 + h / 200),
+        vy: -(15 + Math.random() * 50),
+        r: 3 + Math.random() * 5,
+        gr: 18 + Math.random() * 20,
+        life: 0, max: 0.7 + Math.random() * 0.6, a: 0.55, k: "d"
+      });
+    }
+  }
+  function grain(P) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const hw = 56 / Math.sqrt(P.sq) * (1 + 0.3 * P.slump);
+    parts.push({
+      x: P.x + P.tx + side * hw * (0.8 + Math.random() * 0.15),
+      y: G - 8 - Math.random() * 25,
+      vx: side * (10 + Math.random() * 25),
+      vy: -Math.random() * 20,
+      r: 1.2 + Math.random() * 1.0,
+      gr: 0, life: 0, max: 1.2, a: 0.9, k: "g"
+    });
+  }
+
+  function step() {
+    simT += H;
+    const p0 = pose(simT), p1 = pose(simT - H), p2 = pose(simT - 2 * H);
+    const ay = clamp((p0.y - 2 * p1.y + p2.y) / (H * H), -30000, 30000);
+    const ax = clamp((p0.x - 2 * p1.x + p2.x) / (H * H), -40000, 40000);
+    const l0 = p0.leanBase + p0.bend, l1 = p1.leanBase + p1.bend, l2 = p2.leanBase + p2.bend;
+    const al = clamp((l0 - 2 * l1 + l2) / (H * H), -40000, 40000);
+
+    const tL = p0.ear + p0.tilt + p0.trem * 0.09 * Math.sin(p0.t * 89);
+    const tR = p0.ear - p0.tilt + p0.trem * 0.09 * Math.sin(p0.t * 83 + 2);
+    const kE = 260, cE = 11;
+    const aL = kE * (tL - S.eL) - cE * S.vL - ay * 0.022 - ax * 0.01;
+    const aR = kE * (tR - S.eR) - cE * S.vR - ay * 0.022 + ax * 0.01;
+    S.vL += aL * H; S.eL += S.vL * H;
+    S.vR += aR * H; S.eR += S.vR * H;
+
+    const aw = -120 * S.w - 7 * S.vw - ax * 0.5 - al * 0.2;
+    S.vw += aw * H; S.w += S.vw * H;
+    S.w = clamp(S.w, -45, 45);
+
+    const tc = p0.t, tp = (((simT - H) % T) + T) % T;
+    for (const h of hops) {
+      const L = h.t0 + h.ant + h.air;
+      if (tp < L && L <= tc) puff(h.x1, h.h);
+    }
+    if (p0.trem > 2.4 && Math.random() < p0.trem * 0.03) grain(p0);
+
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const q = parts[i];
+      q.life += H;
+      if (q.k === "d") {
+        q.vx *= 0.975; q.vy *= 0.975; q.vy -= 8 * H; q.r += q.gr * H;
+      } else {
+        q.vy += 500 * H;
+        if (q.y >= G + 2) { q.y = G + 2; q.vy = 0; q.vx *= 0.7; }
+      }
+      q.x += q.vx * H; q.y += q.vy * H;
+      if (q.life >= q.max) parts.splice(i, 1);
+    }
+  }
+
+  // ---------- background ----------
+  const bg = document.createElement("canvas");
+  bg.width = 960 * dpr; bg.height = 540 * dpr;
+  (function paintBG() {
+    const b = bg.getContext("2d");
+    b.scale(dpr, dpr);
+    let g = b.createLinearGradient(0, 0, 0, 380);
+    g.addColorStop(0, "#e4d5b9"); g.addColorStop(1, "#d6c29e");
+    b.fillStyle = g; b.fillRect(0, 0, 960, 380);
+    g = b.createLinearGradient(0, 380, 0, 540);
+    g.addColorStop(0, "#b89a72"); g.addColorStop(1, "#9a7c56");
+    b.fillStyle = g; b.fillRect(0, 380, 960, 160);
+    b.fillStyle = "rgba(80,60,40,0.28)"; b.fillRect(0, 378, 960, 3);
+    b.fillStyle = "rgba(255,245,225,0.18)"; b.fillRect(0, 381, 960, 2);
+    for (const y of [398, 420, 452, 490, 530]) {
+      b.fillStyle = "rgba(70,50,30,0.12)"; b.fillRect(0, y, 960, 1.5);
+    }
+    g = b.createRadialGradient(480, 260, 40, 480, 320, 560);
+    g.addColorStop(0, "rgba(255,248,230,0.35)"); g.addColorStop(1, "rgba(255,248,230,0)");
+    b.fillStyle = g; b.fillRect(0, 0, 960, 540);
+    g = b.createRadialGradient(480, 270, 300, 480, 270, 640);
+    g.addColorStop(0, "rgba(40,25,10,0)"); g.addColorStop(1, "rgba(40,25,10,0.38)");
+    b.fillStyle = g; b.fillRect(0, 0, 960, 540);
+  })();
+
+  // ---------- drawing ----------
+  function drawShadow(P) {
+    const hw = 56 / Math.sqrt(P.sq) * (1 + P.slump * 0.3);
+    const k = clamp(1 - P.y / 320, 0.25, 1);
+    const cx = P.x + P.tx + (P.lean + P.bend) * 0.12;
+    const s = 0.6 + 0.4 * k;
+    ctx.fillStyle = "rgba(60,40,20," + (0.12 * k) + ")";
+    ctx.beginPath(); ctx.ellipse(cx, G + 3, hw * 1.4 * s, 13 * s, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(60,40,20," + (0.22 * k) + ")";
+    ctx.beginPath(); ctx.ellipse(cx, G + 2, hw * 1.08 * s, 8 * s, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function region(D, u0, u1, v0, v1, col) {
+    const n = 8;
+    let q;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) { q = D(lerp(u0, u1, i / n), v0); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }
+    for (let i = 1; i <= n; i++) { q = D(u1, lerp(v0, v1, i / n)); ctx.lineTo(q[0], q[1]); }
+    for (let i = 1; i <= n; i++) { q = D(lerp(u1, u0, i / n), v1); ctx.lineTo(q[0], q[1]); }
+    for (let i = 1; i < n; i++) { q = D(u0, lerp(v1, v0, i / n)); ctx.lineTo(q[0], q[1]); }
+    ctx.closePath();
+    ctx.fillStyle = col;
+    ctx.fill();
+  }
+
+  function polyline(D, pts) {
+    ctx.beginPath();
+    pts.forEach((uv, i) => { const q = D(uv[0], uv[1]); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); });
+    ctx.stroke();
+  }
+
+  function drawSack(P) {
+    const W0 = 112, H0 = 150;
+    const sq = P.sq, sl = P.slump;
+    const hh = H0 * sq * (1 - 0.15 * sl);
+    const hw = W0 / 2 / Math.sqrt(sq);
+    const lean = P.lean, bend = P.bend + S.w;
+    const shift = lean + bend;
+    const ys = 1 / Math.sqrt(1 + Math.pow(shift / hh, 2));
+    const ex = 1 + 0.45 * sl;
+
+    const D = (u, v) => {
+      const vv = Math.pow(Math.max(0, v), ex);
+      let pr = 0.92 + 0.12 * Math.sin(Math.PI * (vv * 0.85 + 0.1));
+      pr *= 1 + sl * (0.38 * (1 - vv) * (1 - vv) - 0.2 * vv * vv);
+      return [u * hw * pr + lean * vv + bend * vv * vv, -vv * hh * ys];
+    };
+
+    const earGeom = (side, e) => {
+      const Sp = D(side * 1, 0.8);
+      const M = D(side * 0.95, 0.955);
+      const Bp = D(side * 0.95, 0.7);
+      const Tp = D(side * 0.66, 0.985);
+      let ux = M[0] - Bp[0], uy = M[1] - Bp[1];
+      const l = Math.hypot(ux, uy) || 1; ux /= l; uy /= l;
+      const ec = clamp(e, -1.5, 1.5);
+      const ang = side * (48 - 52 * ec) * Math.PI / 180;
+      const c = Math.cos(ang), s = Math.sin(ang);
+      const dx = ux * c - uy * s, dy = ux * s + uy * c;
+      const L = 30 * (0.85 + 0.15 * Math.min(1.3, sq));
+      const tip = [M[0] + dx * L, M[1] + dy * L];
+      const mid = [M[0] + (tip[0] - M[0]) * 0.5, M[1] + (tip[1] - M[1]) * 0.5];
+      const C1 = [mid[0] + (Sp[0] - M[0]) * 0.55, mid[1] + (Sp[1] - M[1]) * 0.55];
+      const C2 = [mid[0] + (Tp[0] - M[0]) * 0.55, mid[1] + (Tp[1] - M[1]) * 0.55];
+      return { Sp, M, Tp, tip, C1, C2 };
+    };
+
+    const eR = earGeom(1, S.eR), eL = earGeom(-1, S.eL);
+
+    const path = new Path2D();
+    let q = D(-1, 0.07), r;
+    path.moveTo(q[0], q[1]);
+    q = D(-1, 0); r = D(-0.88, 0); path.quadraticCurveTo(q[0], q[1], r[0], r[1]);
+    r = D(0.88, 0); path.lineTo(r[0], r[1]);
+    q = D(1, 0); r = D(1, 0.07); path.quadraticCurveTo(q[0], q[1], r[0], r[1]);
+    for (let i = 1; i <= 14; i++) { r = D(1, 0.07 + 0.73 * i / 14); path.lineTo(r[0], r[1]); }
+    path.quadraticCurveTo(eR.C1[0], eR.C1[1], eR.tip[0], eR.tip[1]);
+    path.quadraticCurveTo(eR.C2[0], eR.C2[1], eR.Tp[0], eR.Tp[1]);
+    for (let i = 1; i <= 12; i++) {
+      const u = 0.66 - 1.32 * i / 12;
+      const v = 0.985 - 0.022 * (1 - Math.pow(u / 0.66, 2));
+      r = D(u, v); path.lineTo(r[0], r[1]);
+    }
+    path.quadraticCurveTo(eL.C2[0], eL.C2[1], eL.tip[0], eL.tip[1]);
+    path.quadraticCurveTo(eL.C1[0], eL.C1[1], eL.Sp[0], eL.Sp[1]);
+    for (let i = 1; i <= 14; i++) { r = D(-1, 0.8 - 0.73 * i / 14); path.lineTo(r[0], r[1]); }
+    path.closePath();
+
+    ctx.save();
+    ctx.translate(P.x + P.tx, G - P.y);
+    const pv = -hh * 0.45;
+    ctx.translate(0, pv);
+    ctx.rotate(P.rot);
+    ctx.translate(0, -pv);
+
+    ctx.fillStyle = "#f1e7d0";
+    ctx.fill(path);
+
+    ctx.save();
+    ctx.clip(path);
+
+    // stripes
+    region(D, -1.4, 1.4, 0.56, 0.605, "#b4523f");
+    region(D, -1.4, 1.4, 0.635, 0.655, "#b4523f");
+
+    // shading
+    region(D, 0.45, 1.5, -0.1, 1.15, "rgba(120,85,45,0.10)");
+    region(D, 0.72, 1.5, -0.1, 1.15, "rgba(120,85,45,0.12)");
+    region(D, 0.9, 1.5, -0.1, 1.15, "rgba(120,85,45,0.10)");
+    region(D, -1.5, 1.5, -0.1, 0.1, "rgba(120,85,45,0.12)");
+    region(D, -1.5, 1.5, -0.1, 0.045, "rgba(120,85,45,0.10)");
+    region(D, -1.5, 1.5, 0.94, 1.25, "rgba(120,85,45,0.07)");
+    region(D, -0.78, -0.42, 0.22, 0.78, "rgba(255,255,250,0.14)");
+    region(D, -0.7, -0.52, 0.3, 0.7, "rgba(255,255,250,0.14)");
+
+    ctx.lineCap = "round";
+
+    // squash / slump folds
+    const wa = clamp((1 - sq) * 3.2 + sl * 0.9, 0, 1);
+    if (wa > 0.02) {
+      ctx.strokeStyle = "rgba(90,70,48," + (0.45 * wa) + ")";
+      ctx.lineWidth = 2;
+      const folds = [[-0.62, -0.18, 0.16], [0.12, 0.6, 0.2], [-0.35, 0.25, 0.3], [-0.7, -0.3, 0.42], [0.3, 0.7, 0.1]];
+      for (const f of folds) {
+        const pts = [];
+        for (let i = 0; i <= 8; i++) {
+          const u = lerp(f[0], f[1], i / 8);
+          pts.push([u, f[2] + 0.02 * Math.sin(u * 9 + f[2] * 20)]);
+        }
+        polyline(D, pts);
+      }
+    }
+
+    // stretch folds
+    const sa = clamp((sq - 1) * 5, 0, 1);
+    if (sa > 0.02) {
+      ctx.strokeStyle = "rgba(90,70,48," + (0.4 * sa) + ")";
+      ctx.lineWidth = 1.8;
+      for (const side of [-1, 1]) {
+        const pts = [];
+        for (let i = 0; i <= 6; i++) pts.push([side * lerp(0.5, 0.3, i / 6), lerp(0.9, 0.55, i / 6)]);
+        polyline(D, pts);
+      }
+      polyline(D, [[0, 0.9], [0.03, 0.8], [0.05, 0.7]]);
+    }
+
+    // bend folds on the concave side
+    const ba = clamp((Math.abs(shift) - 10) / 35, 0, 1);
+    if (ba > 0.02) {
+      const sd = shift > 0 ? 1 : -1;
+      ctx.strokeStyle = "rgba(90,70,48," + (0.5 * ba) + ")";
+      ctx.lineWidth = 2;
+      for (const v of [0.3, 0.42, 0.54]) {
+        polyline(D, [[sd * 1.02, v], [sd * 0.85, v + 0.015], [sd * 0.66, v - 0.01]]);
+      }
+    }
+
+    // ear creases
+    ctx.strokeStyle = "rgba(90,70,48,0.35)";
+    ctx.lineWidth = 1.6;
+    for (const e of [eL, eR]) {
+      ctx.beginPath();
+      ctx.moveTo(lerp(e.M[0], e.tip[0], -0.15), lerp(e.M[1], e.tip[1], -0.15));
+      ctx.lineTo(lerp(e.M[0], e.tip[0], 0.55), lerp(e.M[1], e.tip[1], 0.55));
+      ctx.stroke();
+    }
+
+    // top seam stitches
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = "rgba(90,70,48,0.55)";
+    ctx.lineWidth = 1.6;
+    const seam = [];
+    for (let i = 0; i <= 12; i++) {
+      const u = lerp(-0.62, 0.62, i / 12);
+      seam.push([u, 0.93 - 0.02 * (1 - Math.pow(u / 0.66, 2))]);
+    }
+    polyline(D, seam);
+    ctx.setLineDash([]);
+
+    ctx.restore(); // clip
+
+    ctx.lineJoin = "round";
+    ctx.lineWidth = 3.2;
+    ctx.strokeStyle = "#4a3a2a";
+    ctx.stroke(path);
+
+    ctx.restore();
+  }
+
+  function drawParticles() {
+    for (const q of parts) {
+      const a = q.a * Math.pow(1 - q.life / q.max, 1.5);
+      if (a <= 0.005) continue;
+      ctx.fillStyle = "rgba(252,248,238," + a + ")";
+      ctx.beginPath();
+      ctx.arc(q.x, q.y, q.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function render() {
+    const P = pose(simT);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.drawImage(bg, 0, 0, 960, 540);
+    drawShadow(P);
+    drawSack(P);
+    drawParticles();
+  }
+
+  // ---------- main loop ----------
+  let last = null, acc = 0;
+  function frame(now) {
+    if (last === null) last = now;
+    let dt = (now - last) / 1000;
+    last = now;
+    if (dt > 0.1) dt = 0.1;
+    if (dt < 0) dt = 0;
+    acc += dt;
+    while (acc >= H) { step(); acc -= H; }
+    render();
+    requestAnimationFrame(frame);
+  }
+  render();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

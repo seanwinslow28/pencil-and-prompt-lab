@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#1e1e1e;}
+body{display:flex;align-items:center;justify-content:center;overflow:hidden;}
+#stage{width:960px;height:540px;position:relative;overflow:hidden;background:#2a2825;box-shadow:0 4px 30px rgba(0,0,0,.5);flex:none;}
+canvas{display:block;width:960px;height:540px;}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<script>
+(()=>{
+'use strict';
+const W=960,H=540,DPR=Math.min(2,window.devicePixelRatio||1);
+const PI=Math.PI,TAU=PI*2,D=PI/180;
+const cv=document.getElementById('c');cv.width=W*DPR;cv.height=H*DPR;
+const ctx=cv.getContext('2d');
+function mk(s){s=s||DPR;const c=document.createElement('canvas');c.width=W*s;c.height=H*s;const x=c.getContext('2d');x.setTransform(s,0,0,s,0,0);return [c,x];}
+const [lay,LY]=mk(),[chr,CH]=mk(),[paper,PA]=mk(),[vig,VG]=mk();
+
+/* ---------- seeded random ---------- */
+let R=Math.random;
+function seed(s){let a=s>>>0;R=()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const rr=(a,b)=>a+(b-a)*R();
+
+/* ---------- vectors ---------- */
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1]],sub=(a,b)=>[a[0]-b[0],a[1]-b[1]],sc=(a,k)=>[a[0]*k,a[1]*k];
+const nrm=a=>{const l=Math.hypot(a[0],a[1])||1;return[a[0]/l,a[1]/l];};
+const lerp=(a,b,t)=>[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t];
+const sm=u=>u*u*(3-2*u);
+function circ(c,r,n,ry){n=n||10;ry=ry===undefined?r:ry;const o=[];for(let i=0;i<n;i++){const a=i/n*TAU;o.push([c[0]+Math.cos(a)*r,c[1]+Math.sin(a)*ry]);}return o;}
+
+/* ---------- curves & pencil ---------- */
+function cat(pts,closed,step){
+  step=step||5;const n=pts.length,out=[];
+  if(n<2)return pts.slice();
+  const segs=closed?n:n-1;
+  const get=i=>closed?pts[((i%n)+n)%n]:pts[Math.max(0,Math.min(n-1,i))];
+  for(let i=0;i<segs;i++){
+    const p0=get(i-1),p1=get(i),p2=get(i+1),p3=get(i+2);
+    const d=Math.hypot(p2[0]-p1[0],p2[1]-p1[1]);
+    const m=Math.max(2,Math.ceil(d/step));
+    for(let k=0;k<m;k++){
+      const t=k/m,t2=t*t,t3=t2*t,o=[];
+      for(let j=0;j<p1.length;j++)o.push(.5*((2*p1[j])+(-p0[j]+p2[j])*t+(2*p0[j]-5*p1[j]+4*p2[j]-p3[j])*t2+(-p0[j]+3*p1[j]-3*p2[j]+p3[j])*t3));
+      out.push(o);
+    }
+  }
+  out.push(closed?out[0].slice():pts[n-1].slice());
+  return out;
+}
+const GR='42,40,48',BL='70,118,205';
+function pen(g,pts,o){
+  o=o||{};
+  const w=o.w??1.25,a=o.a??.85,passes=o.p??2,j=o.j??.8,col=o.c??GR,closed=!!o.closed,ov=o.ov??3;
+  const d=cat(pts,closed,4);if(d.length<2)return;
+  const s=[0];for(let i=1;i<d.length;i++)s.push(s[i-1]+Math.hypot(d[i][0]-d[i-1][0],d[i][1]-d[i-1][1]));
+  const total=s[s.length-1];
+  g.lineCap='round';g.lineJoin='round';
+  for(let p=0;p<passes;p++){
+    const ph1=R()*6.3,ph2=R()*6.3,f1=rr(.03,.09),amp=j*rr(.5,1.2);
+    const ox=rr(-1,1)*j*.6,oy=rr(-1,1)*j*.6;
+    let s0=0,s1=total;
+    if(p>0&&!closed){s0=total*rr(0,.22);s1=total*rr(.72,1);}
+    const arr=[];
+    for(let i=0;i<d.length;i++){
+      if(s[i]<s0||s[i]>s1)continue;
+      const A=d[Math.max(0,i-1)],B=d[Math.min(d.length-1,i+1)];
+      let tx=B[0]-A[0],ty=B[1]-A[1];const tl=Math.hypot(tx,ty)||1;tx/=tl;ty/=tl;
+      const off=amp*(.7*Math.sin(s[i]*f1+ph1)+.3*Math.sin(s[i]*f1*2.7+ph2));
+      arr.push([d[i][0]-ty*off+ox,d[i][1]+tx*off+oy]);
+    }
+    if(arr.length<2)continue;
+    if(!closed){
+      const e=(A,B,k)=>{const dx=A[0]-B[0],dy=A[1]-B[1],l=Math.hypot(dx,dy)||1;return[A[0]+dx/l*k,A[1]+dy/l*k];};
+      arr.unshift(e(arr[0],arr[1],rr(0,ov)));
+      const m=arr.length;arr.push(e(arr[m-1],arr[m-2],rr(0,ov)));
+    }
+    g.strokeStyle=`rgba(${col},${(a*rr(.55,1)).toFixed(3)})`;
+    g.lineWidth=w*rr(.65,1.15);
+    g.beginPath();g.moveTo(arr[0][0],arr[0][1]);
+    for(let i=1;i<arr.length-1;i++){const mx=(arr[i][0]+arr[i+1][0])/2,my=(arr[i][1]+arr[i+1][1])/2;g.quadraticCurveTo(arr[i][0],arr[i][1],mx,my);}
+    const l=arr[arr.length-1];g.lineTo(l[0],l[1]);g.stroke();
+  }
+}
+function pathOf(g,d){g.beginPath();d.forEach((p,i)=>i?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1]));g.closePath();}
+function erase(g,pts){const d=cat(pts,true,6);g.save();g.globalCompositeOperation='destination-out';g.fillStyle='#000';pathOf(g,d);g.fill();g.restore();}
+function hatch(g,pts,o){
+  o=o||{};const ang=o.ang??-1,sp=o.sp??4,a=o.a??.2,w=o.w??.8;
+  const d=cat(pts,true,6);
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const p of d){if(p[0]<x0)x0=p[0];if(p[0]>x1)x1=p[0];if(p[1]<y0)y0=p[1];if(p[1]>y1)y1=p[1];}
+  g.save();pathOf(g,d);g.clip();
+  const cx=(x0+x1)/2,cy=(y0+y1)/2,r=Math.hypot(x1-x0,y1-y0)/2+3,ca=Math.cos(ang),sa=Math.sin(ang);
+  g.lineCap='round';
+  for(let t=-r;t<=r;t+=sp*rr(.75,1.3)){
+    const x=cx-sa*t,y=cy+ca*t,k=r*rr(.8,1);
+    g.strokeStyle=`rgba(${o.c??GR},${(a*rr(.5,1)).toFixed(3)})`;g.lineWidth=w*rr(.7,1.3);
+    g.beginPath();g.moveTo(x-ca*k,y-sa*k);g.lineTo(x+ca*k+rr(-1,1),y+sa*k+rr(-1,1));g.stroke();
+  }
+  g.restore();
+}
+function tube(ctrl){
+  const d=cat(ctrl,false,4),L=[],Rt=[];
+  for(let i=0;i<d.length;i++){
+    const a=d[Math.max(0,i-1)],b=d[Math.min(d.length-1,i+1)];
+    let tx=b[0]-a[0],ty=b[1]-a[1];const l=Math.hypot(tx,ty)||1;tx/=l;ty/=l;
+    const h=d[i][2]/2;
+    L.push([d[i][0]-ty*h,d[i][1]+tx*h]);Rt.push([d[i][0]+ty*h,d[i][1]-tx*h]);
+  }
+  return{L,R:Rt,outline:L.concat(Rt.slice().reverse()),c:d};
+}
+
+/* ---------- rig constants ---------- */
+const G=440,CX=432,N=32;
+const ST=.64,STRIDE=64,FL=34,A0=10*D,A1=16*D,LIFT=9;
+const THIGH=72,SHIN=72,UARM=56,FARM=56,LC=116;
+const FC=CX-4;
+const K=.3,P0=-.19; // limp: hurry off the sore left leg
+function warp(p){return p-(K/TAU)*(Math.sin(TAU*(p-P0))-Math.sin(-TAU*P0));}
+
+function flatX(t){return FC+STRIDE/2-STRIDE*t/ST;}
+function stance(t){
+  const x=flatX(t),h1=ST*.14,h2=ST*.70;
+  if(t<h1){const u=t/h1;return{hx:x,hy:G,a:A0*(1-sm(u))};}
+  if(t>h2){const u=(t-h2)/(ST-h2),a=-A1*u*u,tx=x+FL;return{hx:tx-FL*Math.cos(a),hy:G+FL*Math.sin(a),a};}
+  return{hx:x,hy:G,a:0};
+}
+function footAt(t){
+  t=((t%1)+1)%1;
+  if(t<ST)return stance(t);
+  const u=(t-ST)/(1-ST),s0=stance(ST-1e-6),s1=stance(0),e=sm(u);
+  return{hx:s0.hx+(s1.hx-s0.hx)*e,hy:s0.hy+(s1.hy-s0.hy)*u-LIFT*Math.sin(PI*u),a:s0.a+(s1.a-s0.a)*sm(Math.min(1,u*1.15))};
+}
+function footPt(f,u,v){const c=Math.cos(f.a),s=Math.sin(f.a);return[f.hx+u*c-v*s,f.hy-u*s-v*c];}
+const ankleOf=f=>footPt(f,8,11);
+function ik(a,b,l1,l2,s){
+  const dx=b[0]-a[0],dy=b[1]-a[1];let d=Math.hypot(dx,dy);
+  d=Math.max(Math.abs(l1-l2)+.01,Math.min(l1+l2-.01,d));
+  const base=Math.atan2(dy,dx);
+  const al=Math.acos(Math.max(-1,Math.min(1,(l1*l1+d*d-l2*l2)/(2*l1*d))));
+  const an=base+s*al;return[a[0]+l1*Math.cos(an),a[1]+l1*Math.sin(an)];
+}
+
+function pose(q){
+  const P={q};
+  const c2=ph=>Math.cos(TAU*(q-ph)),c4=ph=>Math.cos(2*TAU*(q-ph)),s2=ph=>Math.sin(TAU*(q-ph));
+  const bob=3*c4(.06)+1.4*c2(.06);
+  const hip=[CX+1.5*Math.sin(2*TAU*(q-.1)),G-148+bob];
+  const lean=30*D+1.4*D*c4(.14)+1.1*D*c2(.2);
+  const bend=18+1.5*c4(.16);
+  const cs=Math.cos(lean),sn=Math.sin(lean);
+  const tp=(f,u)=>{const fb=f+bend*Math.pow(Math.max(0,u)/100,2);return[hip[0]+fb*cs+u*sn,hip[1]+fb*sn-u*cs];};
+  P.hip=hip;P.tp=tp;
+  P.fn=footAt(q);P.ff=footAt(q+.5);
+  P.an=ankleOf(P.fn);P.af=ankleOf(P.ff);
+  P.hipN=[hip[0],hip[1]+.8*s2(.3)];
+  P.hipF=[hip[0]-3,hip[1]-1-.8*s2(.3)];
+  P.kn=ik(P.hipN,P.an,THIGH,SHIN,-1);
+  P.kf=ik(P.hipF,P.af,THIGH,SHIN,-1);
+  const tc=((q+.03)%1+1)%1;let tip,phi;
+  if(tc<.5){const u=tc/.5;tip=[CX+100-50*u,G];phi=-12*D+22*D*u;}
+  else{const u=(tc-.5)/.5,e=sm(u);tip=[CX+50+50*e,G-8*Math.sin(PI*u)];phi=10*D-22*D*e;}
+  P.tip=tip;P.phi=phi;
+  const cup=[Math.sin(phi),-Math.cos(phi)],cfw=[Math.cos(phi),Math.sin(phi)];
+  P.cp=(u,v)=>[tip[0]+cfw[0]*u+cup[0]*v,tip[1]+cfw[1]*u+cup[1]*v];
+  P.grip=P.cp(6,LC+9);
+  P.Sf=tp(0,84);
+  P.ef=ik(P.Sf,P.grip,UARM,FARM,1);
+  const sw=-3*c2(0);
+  P.Sn=tp(4,88);P.en=tp(-42+sw,52);P.hn=tp(-34+sw*.5,26);
+  const nk=tp(14,104);
+  P.head=[nk[0]+18+.6*Math.sin(q*TAU*9),nk[1]-34+1.2*c4(.2)];
+  P.ht=-3*D+2.5*D*c4(.12)+1*D*c2(.1);
+  const hc=Math.cos(P.ht),hs=Math.sin(P.ht);
+  P.hp=(x,y)=>[P.head[0]+x*hc-y*hs,P.head[1]+x*hs+y*hc];
+  P.sa1=.05+.10*Math.sin(2*TAU*(q-.18));
+  P.sa2=P.sa1+.12*Math.sin(2*TAU*(q-.3));
+  return P;
+}
+
+/* ---------- body parts ---------- */
+function drawLeg(g,hip,knee,ank,f,far){
+  const k=far?.6:1;
+  const sh=[[-5,2],[8,0],[28,0],[38,1],[41,5],[38,10],[28,13],[18,16],[8,18],[-2,17],[-6,11]].map(p=>footPt(f,p[0],p[1]));
+  erase(g,sh);
+  pen(g,sh,{closed:true,a:.9*k,w:1.35});
+  hatch(g,sh,{a:far?.32:.24,sp:3,ang:-1.2});
+  pen(g,[footPt(f,-4,3),footPt(f,20,3.2),footPt(f,39,3)],{a:.6*k,w:1,p:1});
+  pen(g,[footPt(f,4,0),footPt(f,4,4.5)],{a:.6*k,w:1,p:1,ov:1});
+  pen(g,[footPt(f,27,12),footPt(f,31,7),footPt(f,39,4)],{a:.5*k,p:1});
+  pen(g,[footPt(f,13,16),footPt(f,18,14)],{a:.5*k,p:1,w:.9});
+  const dk=nrm(sub(ank,knee)),dh=nrm(sub(knee,hip));
+  const top=sub(hip,sc(dh,12)),cuff=add(ank,sc(dk,6));
+  const t=tube([[top[0],top[1],30],[hip[0],hip[1],29],[knee[0],knee[1],22],[cuff[0],cuff[1],22]]);
+  erase(g,t.outline);
+  pen(g,t.L,{a:.9*k});pen(g,t.R,{a:.9*k});
+  const e1=t.L[t.L.length-1],e2=t.R[t.R.length-1];
+  pen(g,[e1,add(lerp(e1,e2,.5),sc(dk,2)),e2],{a:.85*k});
+  const ta=nrm(sub(ank,hip)),nL=[-ta[1],ta[0]];
+  pen(g,[add(knee,add(sc(nL,11),sc(ta,-5))),add(knee,add(sc(nL,5),sc(ta,-1)))],{a:.5*k,p:1});
+  pen(g,[add(knee,add(sc(nL,11),sc(ta,2))),add(knee,add(sc(nL,6),sc(ta,4)))],{a:.4*k,p:1});
+  pen(g,[add(knee,sc(nL,-6)),add(cuff,sc(nL,-5))],{a:.22*k,p:1});
+  if(far)hatch(g,t.outline,{a:.13,sp:4.5,ang:-.7});
+}
+function drawCane(g,P){
+  const c=P.cp;
+  pen(g,[c(-2.5,6),c(-2.5,LC*.5),c(-2.5,LC)],{w:1.25});
+  pen(g,[c(2.5,6),c(2.5,LC*.5),c(2.5,LC-1)],{w:1.25});
+  pen(g,[c(-2.5,LC),c(-2,LC+8),c(3,LC+14),c(12,LC+14),c(17,LC+9),c(17,LC+2)],{w:1.3});
+  pen(g,[c(2.5,LC-1),c(3,LC+6),c(7,LC+9.5),c(11,LC+9),c(13,LC+6),c(13,LC+2)],{w:1.1});
+  pen(g,[c(13,LC+2),c(17,LC+2)],{p:1,ov:1});
+  const fer=[c(-3,0),c(3,0),c(3,7),c(-3,7)];
+  pen(g,fer,{closed:true,p:1,w:1.1});hatch(g,fer,{a:.5,sp:2});
+  pen(g,[c(-2,40),c(-1,46)],{a:.3,p:1,w:.8});pen(g,[c(0,78),c(1,86)],{a:.3,p:1,w:.8});
+}
+function limb(g,j1,j2,end,w0,w1,w2,o){
+  o=o||{};const a=o.a??.9;
+  const du=nrm(sub(j2,j1));
+  const top=add(j1,sc(du,-8));
+  const up=tube([[top[0],top[1],w0],[j1[0],j1[1],w0+1],[j2[0]+du[0]*2,j2[1]+du[1]*2,w1]]);
+  erase(g,up.outline);pen(g,up.L,{a});pen(g,up.R,{a});
+  const eL=up.L[up.L.length-1],eR=up.R[up.R.length-1];
+  pen(g,[eL,add(j2,sc(du,w1*.5+2)),eR],{a});
+  const dl=nrm(sub(end,j2)),st=sub(j2,sc(dl,2));
+  const lo=tube([[st[0],st[1],w1*.92],[end[0],end[1],w2]]);
+  erase(g,lo.outline);pen(g,lo.L,{a});pen(g,lo.R,{a});
+  const cL=lo.L[lo.L.length-1],cR=lo.R[lo.R.length-1];
+  pen(g,[cL,cR],{a,p:1});
+  pen(g,[sub(cL,sc(dl,4)),sub(cR,sc(dl,4))],{a:a*.5,p:1,w:.9});
+  const nL=[-dl[1],dl[0]];
+  pen(g,[add(j2,add(sc(nL,-w1*.3),sc(dl,4))),add(j2,add(sc(nL,-w1*.05),sc(dl,9)))],{a:a*.45,p:1});
+}
+function drawFist(g,P){
+  const d=nrm(sub(P.grip,P.ef)),pr=[-d[1],d[0]];
+  const f=(a,b)=>[P.grip[0]+d[0]*a+pr[0]*b,P.grip[1]+d[1]*a+pr[1]*b];
+  const sh=[[-7,-6],[1,-8],[7,-6],[10,-1],[9,5],[4,8],[-3,8],[-8,4]].map(p=>f(p[0],p[1]));
+  erase(g,sh);pen(g,sh,{closed:true,w:1.2});
+  pen(g,[f(3,-6),f(6,-1),f(6,5)],{a:.45,p:1});
+  pen(g,[f(-1,-6),f(1,0),f(0,6)],{a:.35,p:1});
+}
+function drawHand(g,P){
+  const d=nrm(sub(P.hn,P.en)),pr=[-d[1],d[0]];
+  const f=(a,b)=>[P.hn[0]+d[0]*a+pr[0]*b,P.hn[1]+d[1]*a+pr[1]*b];
+  const sh=[[-4,-6.5],[5,-7.5],[12,-6],[16,-1],[15,4],[9,7.5],[0,7],[-4,5]].map(p=>f(p[0],p[1]));
+  erase(g,sh);pen(g,sh,{closed:true,w:1.2});
+  pen(g,[f(8,-6),f(11,-1),f(10,5)],{a:.45,p:1});
+  pen(g,[f(12,-5),f(14,0),f(13,4)],{a:.4,p:1});
+}
+function drawTorso(g,P){
+  const tp=P.tp,T=a=>a.map(p=>tp(p[0],p[1]));
+  const back=T([[-24,-14],[-27,18],[-29,48],[-28,72],[-18,95],[-4,106],[8,110]]);
+  const front=T([[22,103],[31,84],[37,58],[39,32],[34,8],[27,-14]]);
+  erase(g,back.concat(front,[tp(0,-18)]));
+  pen(g,back,{w:1.45});pen(g,front,{w:1.3});
+  pen(g,T([[27,-14],[0,-18],[-24,-14]]),{w:1.2});
+  pen(g,T([[29,-6],[2,-10],[-26,-6]]),{a:.45,p:1});
+  for(let x=-20;x<=24;x+=6)pen(g,T([[x,-16],[x+.5,-9]]),{a:.3,p:1,w:.8,ov:1});
+  pen(g,T([[21,100],[29,82],[34,58],[35,32],[30,8],[23,-13]]),{a:.4,p:1});
+  [[33,70],[35,46],[32,22]].forEach(c=>pen(g,circ(tp(c[0],c[1]),2.2,6),{closed:true,a:.7,w:1,p:1}));
+  pen(g,T([[6,5],[24,8],[23,27]]),{a:.5,p:1});
+  pen(g,T([[4,26],[23,27]]),{a:.7,w:1.4});
+  pen(g,T([[4,26],[6,5]]),{a:.5,p:1});
+  pen(g,T([[-24,84],[-14,92]]),{a:.35,p:1});
+  pen(g,T([[-26,62],[-18,68]]),{a:.28,p:1});
+  pen(g,T([[28,50],[34,44]]),{a:.3,p:1});
+}
+function drawHead(g,P){
+  const tp=P.tp,hp=P.hp,h=a=>a.map(p=>hp(p[0],p[1]));
+  const nq=[tp(-2,104),hp(-12,20),hp(4,26),tp(20,100)];
+  erase(g,nq);
+  pen(g,[tp(-2,104),lerp(tp(-2,104),hp(-12,20),.5),hp(-12,20)]);
+  pen(g,[tp(20,100),add(lerp(tp(20,100),hp(4,26),.5),[0,2]),hp(4,26)]);
+  pen(g,[lerp(tp(20,100),hp(4,26),.35),lerp(tp(20,100),hp(4,26),.6)],{a:.35,p:1});
+  const sil=h([[-24,-8],[-25,4],[-20,15],[-12,22],[0,26],[8,28],[16,28],[21,24],[19,20],[22,15],[28,14],[34,12],[36,6],[31,0],[24,-2],[24,-9],[23,-14],[38,-15],[39,-19],[25,-22],[14,-29],[0,-32],[-14,-28],[-23,-18]]);
+  erase(g,sil);
+  pen(g,h([[-23,-9],[-25,4],[-20,15],[-12,22]]),{w:1.3});
+  pen(g,h([[-8,24],[4,27],[14,28],[20,24],[18,20]]),{w:1.25});
+  pen(g,h([[21,-12],[23,-6],[24,-2],[23,1]]),{w:1.25});
+  pen(g,h([[22,1],[29,0],[35,4],[36,9],[32,13],[26,13],[23,11]]),{w:1.35});
+  pen(g,h([[29,10],[31,11.5]]),{a:.6,p:1,ov:1});
+  pen(g,h([[22,12],[27,15],[26,19],[21,20],[16,18],[15,14]]),{a:.8});
+  for(let k=0;k<6;k++)pen(g,[hp(16+k*2,13+rr(0,1)),hp(15.5+k*2.1,19+rr(0,2))],{a:.45,p:1,w:.9,ov:1});
+  pen(g,h([[16,21.5],[19.5,22.5]]),{a:.6,p:1});
+  pen(g,circ(hp(16,-3),6.5,10),{closed:true,a:.8,w:1.1});
+  pen(g,[hp(9.5,-3),hp(2,-2.5),hp(-6,-2)],{a:.65,w:1});
+  pen(g,[hp(11,-5),hp(16,-6.8),hp(21,-5)],{a:.7,p:1});
+  g.fillStyle=`rgba(${GR},.9)`;const ey=hp(17.5,-2.5);g.beginPath();g.arc(ey[0],ey[1],1.5,0,TAU);g.fill();
+  for(let k=0;k<5;k++)pen(g,[hp(9+k*3,-9.5+rr(-.5,.5)),hp(12.5+k*3,-12.5+rr(-1,.5))],{a:.6,p:1,w:1,ov:1});
+  pen(g,h([[-3,-6],[-9,-5],[-10,2],[-7,7],[-3,6]]),{w:1.1});
+  pen(g,h([[-5,-2],[-7,1],[-5,4]]),{a:.45,p:1});
+  pen(g,h([[8,5],[11,10],[12,15]]),{a:.35,p:1});
+  pen(g,h([[8,-1],[5,-3]]),{a:.35,p:1});pen(g,h([[8,1],[5,1.5]]),{a:.3,p:1});
+  for(let k=0;k<4;k++)pen(g,[hp(-21-rr(0,2),-7+k*3),hp(-26-rr(0,2),-5+k*3.5)],{a:.45,p:1,w:.8,ov:1});
+  const cap=h([[-24,-8],[-23,-18],[-14,-28],[0,-32],[14,-29],[25,-22],[26,-14],[0,-10]]);
+  pen(g,h([[-24,-8],[-23,-18],[-14,-28],[0,-32],[14,-29],[25,-22],[27,-17]]),{w:1.35});
+  pen(g,h([[-24,-8],[0,-10],[23,-13]]),{w:1.2});
+  const brim=h([[22,-14],[38,-15],[39,-19],[26,-20]]);
+  pen(g,brim,{w:1.3});hatch(g,brim,{a:.35,sp:2.5,ang:.2});
+  pen(g,h([[0,-31],[10,-24],[17,-16]]),{a:.4,p:1});
+  hatch(g,cap,{a:.2,sp:3.5,ang:-.6});hatch(g,cap,{a:.12,sp:4.5,ang:.8});
+  pen(g,circ(hp(0,-32),1.8,6),{closed:true,a:.7,p:1});
+}
+function drawScarf(g,P){
+  const tp=P.tp;
+  const K=tp(28,92);
+  const p1=add(K,[Math.sin(P.sa1)*22,Math.cos(P.sa1)*22]);
+  const p2=add(p1,[Math.sin(P.sa2)*22,Math.cos(P.sa2)*22]);
+  const tl=tube([[K[0],K[1],12],[p1[0],p1[1],11.5],[p2[0],p2[1],11]]);
+  erase(g,tl.outline);pen(g,tl.L,{a:.85});pen(g,tl.R,{a:.85});
+  const n=tl.L.length,e1=tl.L[n-1],e2=tl.R[n-1];
+  pen(g,[e1,e2],{a:.8});
+  [Math.floor(n*.55),Math.floor(n*.7)].forEach(i=>pen(g,[tl.L[i],tl.R[i]],{a:.5,p:1}));
+  const dd=nrm(sub(p2,p1));
+  for(let k=0;k<5;k++){const s=lerp(e1,e2,.1+k*.2);pen(g,[s,add(s,sc(add(dd,[rr(-.2,.2),0]),rr(4,7)))],{a:.55,p:1,w:.9,ov:1});}
+  hatch(g,tl.outline,{a:.1,sp:3,ang:.9});
+  const band=tube([[...tp(-10,97),12],[...tp(2,107),13],[...tp(18,106),13],[...tp(30,97),12]]);
+  erase(g,band.outline);pen(g,band.L,{a:.85});pen(g,band.R,{a:.85});
+  pen(g,[band.L[0],band.R[0]],{a:.6,p:1});
+  hatch(g,band.outline,{a:.1,sp:3,ang:.9});
+  const kn=circ(tp(29,94),6.5,8);
+  erase(g,kn);pen(g,kn,{closed:true,a:.85});
+  pen(g,[tp(26,98),tp(30,92)],{a:.4,p:1});
+}
+function drawChar(g,P){
+  drawLeg(g,P.hipF,P.kf,P.af,P.ff,true);
+  drawCane(g,P);
+  limb(g,P.Sf,P.ef,add(P.grip,sc(nrm(sub(P.ef,P.grip)),8)),19,16,13,{a:.8});
+  drawFist(g,P);
+  drawLeg(g,P.hipN,P.kn,P.an,P.fn,false);
+  drawTorso(g,P);
+  drawHead(g,P);
+  drawScarf(g,P);
+  limb(g,P.Sn,P.en,add(P.hn,sc(nrm(sub(P.en,P.hn)),7)),21,18,15,{a:.92});
+  drawHand(g,P);
+}
+function construct(g,P,i){
+  const o={c:BL,a:.32,w:.9,p:1,j:1.4,ov:7};
+  pen(g,[[140,G+1],[480,G+.5],[830,G+1.5]],{...o,a:.26});
+  [FC+STRIDE/2,FC-STRIDE/2+FL].forEach(x=>pen(g,[[x,G-7],[x,G+8]],o));
+  pen(g,[[CX,G-305],[CX,G+10]],{...o,a:.1});
+  pen(g,[P.hip,P.tp(-14,50),P.tp(2,98),P.head],{...o,a:.3});
+  pen(g,circ(P.head,23,9),{...o,closed:true});
+  pen(g,circ(P.hip,17,8,11),{...o,closed:true});
+  pen(g,circ(P.tp(0,68),30,9,27),{...o,closed:true,a:.2});
+  [P.kn,P.kf,P.an,P.af,P.ef].forEach(k=>pen(g,circ(k,4.5,6),{...o,closed:true,a:.24}));
+  pen(g,[P.hp(-18,-2),P.hp(32,-3)],{...o,a:.22});
+  pen(g,[P.hp(20,-26),P.hp(22,26)],{...o,a:.18});
+  pen(g,[P.Sf,P.grip],{...o,a:.14});
+  pen(g,[[CX-115,G],[CX+30,G+.4],[CX+150,G]],{a:.55,w:1.1,p:2,j:.5});
+  pen(g,[[CX-150,G+.5],[CX-122,G+.6]],{a:.3,p:1});
+  pen(g,[[CX+162,G+.3],[CX+190,G]],{a:.3,p:1});
+  if(i%8===0){
+    pen(g,[[872,42],[872,112]],{a:.5,p:1});
+    for(let k=0;k<=8;k++){const y=42+70*sm(k/8);pen(g,[[864,y],[880,y]],{a:.45,p:1,w:.9,ov:1});}
+    pen(g,circ([872,34],6,8),{closed:true,a:.45,p:1});
+  }
+  for(let k=0;k<2;k++){
+    const x=rr(CX-80,CX+180),y=rr(G-280,G-20),r=rr(15,40);
+    const gr=g.createRadialGradient(x,y,0,x,y,r);gr.addColorStop(0,'rgba(60,55,50,.05)');gr.addColorStop(1,'rgba(60,55,50,0)');
+    g.fillStyle=gr;g.fillRect(x-r,y-r,r*2,r*2);
+  }
+}
+
+/* ---------- paper, grain, vignette ---------- */
+(function(){
+  PA.fillStyle='#ebe6d8';PA.fillRect(0,0,W,H);
+  const n=document.createElement('canvas');n.width=W;n.height=H;const nx=n.getContext('2d');
+  const id=nx.createImageData(W,H),dd=id.data;
+  for(let i=0;i<dd.length;i+=4){const v=Math.random(),g=v<.5?70:255;dd[i]=g;dd[i+1]=g-4;dd[i+2]=g-12;dd[i+3]=Math.abs(v-.5)*26;}
+  nx.putImageData(id,0,0);PA.drawImage(n,0,0,W,H);
+  for(let i=0;i<280;i++){
+    const x=Math.random()*W,y=Math.random()*H,a=Math.random()*TAU,l=4+Math.random()*14;
+    PA.strokeStyle=`rgba(120,105,80,${.04+Math.random()*.05})`;PA.lineWidth=.6;
+    PA.beginPath();PA.moveTo(x,y);PA.quadraticCurveTo(x+Math.cos(a)*l*.5+Math.random()*3,y+Math.sin(a)*l*.5+Math.random()*3,x+Math.cos(a)*l,y+Math.sin(a)*l);PA.stroke();
+  }
+  const hg=PA.createRadialGradient(W*.5,H*.45,40,W*.5,H*.45,W*.6);
+  hg.addColorStop(0,'rgba(255,253,245,.18)');hg.addColorStop(1,'rgba(255,253,245,0)');
+  PA.fillStyle=hg;PA.fillRect(0,0,W,H);
+  const y=526;
+  const hole=(x,w)=>{PA.beginPath();const r=4.6;PA.moveTo(x-w/2+r,y-r);PA.lineTo(x+w/2-r,y-r);PA.arc(x+w/2-r,y,r,-PI/2,PI/2);PA.lineTo(x-w/2+r,y+r);PA.arc(x-w/2+r,y,r,PI/2,PI*1.5);PA.closePath();};
+  PA.fillStyle='#3a3833';PA.strokeStyle='rgba(0,0,0,.2)';PA.lineWidth=1.5;
+  hole(372,32);PA.fill();PA.stroke();hole(588,32);PA.fill();PA.stroke();
+  PA.beginPath();PA.arc(480,y,7.5,0,TAU);PA.fill();PA.stroke();
+  PA.fillStyle='rgba(160,160,165,.35)';
+  PA.beginPath();PA.arc(479,y-2,3,0,TAU);PA.fill();
+  const vg=VG.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,W*.62);
+  vg.addColorStop(0,'rgba(25,20,10,0)');vg.addColorStop(1,'rgba(25,20,10,.42)');
+  VG.fillStyle=vg;VG.fillRect(0,0,W,H);
+})();
+const grains=[];
+for(let k=0;k<4;k++){
+  const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');
+  const id=x.createImageData(W,H),d=id.data;
+  for(let i=0;i<d.length;i+=4){const v=Math.random(),g=v<.5?0:255;d[i]=d[i+1]=d[i+2]=g;d[i+3]=Math.pow(Math.abs(v-.5)*2,2)*40;}
+  x.putImageData(id,0,0);grains.push(c);
+}
+
+/* ---------- render ---------- */
+function renderDrawing(i){
+  seed(1013+i*7919);
+  const P=pose(warp(i/N));
+  LY.clearRect(0,0,W,H);CH.clearRect(0,0,W,H);
+  construct(LY,P,i);
+  drawChar(CH,P);
+  LY.drawImage(chr,0,0,W,H);
+}
+function composite(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle='#2a2825';ctx.fillRect(0,0,W,H);
+  const jx=(Math.random()-.5)*1.2,jy=(Math.random()-.5)*1.2,jr=(Math.random()-.5)*.0012;
+  ctx.save();ctx.translate(W/2+jx,H/2+jy);ctx.rotate(jr);ctx.scale(1.012,1.012);ctx.translate(-W/2,-H/2);
+  ctx.drawImage(paper,0,0,W,H);ctx.drawImage(lay,0,0,W,H);ctx.restore();
+  const f=(Math.random()-.5)*.07;
+  ctx.fillStyle=f>0?`rgba(255,250,236,${f})`:`rgba(30,24,14,${-f})`;ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=.55;ctx.drawImage(grains[(Math.random()*grains.length)|0],0,0,W,H);ctx.globalAlpha=1;
+  ctx.drawImage(vig,0,0,W,H);
+  if(Math.random()<.18){
+    ctx.fillStyle='rgba(20,18,15,.55)';
+    const n=1+(Math.random()*3|0);
+    for(let k=0;k<n;k++){ctx.beginPath();ctx.arc(Math.random()*W,Math.random()*H,.6+Math.random()*1.3,0,TAU);ctx.fill();}
+  }
+  if(Math.random()<.03){
+    const x=Math.random()*W,y=Math.random()*H;
+    ctx.strokeStyle='rgba(20,18,15,.45)';ctx.lineWidth=.8;ctx.beginPath();ctx.moveTo(x,y);
+    ctx.bezierCurveTo(x+10,y-8,x+14,y+12,x+26,y+4);ctx.stroke();
+  }
+}
+let lastD=-1,lastCam=-1,t0=null;
+function frame(now){
+  if(t0===null)t0=now;
+  const cam=Math.floor((now-t0)/1000*24);
+  if(cam!==lastCam){
+    lastCam=cam;
+    const di=Math.floor(cam/2)%N;
+    if(di!==lastD){lastD=di;renderDrawing(di);}
+    composite();
+  }
+  requestAnimationFrame(frame);
+}
+renderDrawing(0);lastD=0;composite();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

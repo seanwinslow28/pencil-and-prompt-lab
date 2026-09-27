@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flour Sack Test</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #f3f0ea; }
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+  canvas { width: 960px; height: 540px; display: block; border-radius: 6px;
+           box-shadow: 0 10px 40px rgba(60,45,30,0.18); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function () {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = 960 * dpr; cv.height = 540 * dpr;
+
+  const GY = 440, H = 210, W = 150;
+  const T = 24.5;               // loop length (s): rest 2 + joy 7.5 + sadness 8 + fear 7
+  const TAU = Math.PI * 2;
+
+  const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+  const lerp = (a, b, u) => a + (b - a) * u;
+  const lerp2 = (p, q, u) => [lerp(p[0], q[0], u), lerp(p[1], q[1], u)];
+  const sstep = (a, b, x) => { const u = clamp((x - a) / (b - a)); return u * u * (3 - 2 * u); };
+  const EASE = {
+    io: u => u * u * (3 - 2 * u),
+    l: u => u,
+    o: u => 1 - Math.pow(1 - u, 3),
+    i: u => u * u * u,
+    sn: u => 1 - Math.pow(1 - u, 4)
+  };
+
+  function key(t, ks) {
+    if (t <= ks[0][0]) return ks[0][1];
+    for (let i = 1; i < ks.length; i++) {
+      if (t <= ks[i][0]) {
+        const t0 = ks[i - 1][0], v0 = ks[i - 1][1];
+        const t1 = ks[i][0], v1 = ks[i][1], e = ks[i][2] || 'io';
+        const u = EASE[e]((t - t0) / (t1 - t0));
+        return v0 + (v1 - v0) * u;
+      }
+    }
+    return ks[ks.length - 1][1];
+  }
+
+  function base() {
+    return { x: 480, lift: 0, sq: 1, pinch: 0, bulge: 0, lean: 0, bend: 0,
+             earL: 0.25, earR: 0.25, earRot: 0, rot: 0,
+             jx: 0, jsq: 0, jbend: 0, jlean: 0, jeL: 0, jeR: 0 };
+  }
+
+  // ---------- one hop cycle ----------
+  function hop(u, hm, sq0 = 1.05, deep = 0.77, land = 0.74) {
+    let lift = 0, sq = sq0, prog = 0, air = 0;
+    if (u < 0.22) {
+      sq = lerp(sq0, deep, EASE.io(u / 0.22));
+    } else if (u < 0.75) {
+      const q = (u - 0.22) / 0.53;
+      lift = hm * 4 * q * (1 - q);
+      const s = 1 + 0.2 * Math.pow(Math.abs(1 - 2 * q), 1.5);
+      sq = q < 0.12 ? lerp(deep, s, EASE.o(q / 0.12)) : s;
+      prog = q; air = Math.sin(Math.PI * q);
+    } else {
+      const q = (u - 0.75) / 0.25;
+      sq = sq0 - (sq0 - land) * (1 - q) * (1 - q) * Math.cos(q * Math.PI * 1.6);
+      prog = 1;
+    }
+    return { lift, sq, prog, air };
+  }
+
+  // ---------- REST ----------
+  function rest(t) {
+    const p = base();
+    p.sq = 1 + 0.02 * Math.pow(Math.sin(Math.PI * t / 2), 2);
+    return p;
+  }
+
+  // ---------- JOY ----------
+  function joy(t) {
+    const p = base();
+    p.sq = 1.05;
+    p.earL = p.earR = key(t, [[0, 0.25], [0.35, -0.08, 'o']]);
+    if (t < 0.6) {
+      p.sq = key(t, [[0, 1], [0.3, 1.12, 'o'], [0.6, 1.05]]);
+      p.bend = key(t, [[0, 0], [0.3, -0.12], [0.6, 0]]);
+    } else if (t < 3.4) {
+      const k = Math.min(3, Math.floor((t - 0.6) / 0.7));
+      const u = clamp(((t - 0.6) - k * 0.7) / 0.7);
+      const xs = [480, 540, 600, 530, 460];
+      const hm = [55, 70, 60, 75][k];
+      const h = hop(u, hm);
+      p.lift = h.lift; p.sq = h.sq;
+      p.x = lerp(xs[k], xs[k + 1], h.prog);
+      p.lean = 0.14 * Math.sign(xs[k + 1] - xs[k]) * h.air;
+    } else if (t < 5.0) {
+      const w = t - 3.4;
+      const env = EASE.io(clamp(w / 0.3)) * EASE.io(clamp((1.6 - w) / 0.3));
+      const ph = TAU * 2.5 * w;
+      p.x = 460;
+      p.jx = 7 * Math.sin(ph) * env;
+      p.jbend = 0.32 * Math.sin(ph) * env;
+      p.jlean = 0.07 * Math.sin(ph - 0.8) * env;
+      p.jsq = -0.07 * env * (0.5 - 0.5 * Math.cos(2 * ph));
+      p.jeL = 0.35 * env * Math.max(0, Math.sin(ph));
+      p.jeR = 0.35 * env * Math.max(0, -Math.sin(ph));
+    } else if (t < 6.6) {
+      const d = t - 5;
+      p.x = 460;
+      if (d < 0.4) {
+        const k = d / 0.4;
+        p.sq = lerp(1.05, 0.62, EASE.io(k));
+        p.rot = -0.18 * EASE.io(k);
+        p.earL = p.earR = lerp(-0.08, 0.2, EASE.io(k));
+      } else if (d < 1.25) {
+        const q = (d - 0.4) / 0.85;
+        p.lift = 170 * 4 * q * (1 - q);
+        p.x = lerp(460, 480, q);
+        p.rot = lerp(-0.18, TAU, EASE.io(q));
+        let s = q < 0.5 ? lerp(1.25, 0.9, EASE.o(q * 2)) : lerp(0.9, 1.18, EASE.i((q - 0.5) * 2));
+        if (q < 0.1) s = lerp(0.62, s, EASE.o(q / 0.1));
+        p.sq = s;
+        p.earL = p.earR = lerp(0.2, -0.08, EASE.o(q));
+      } else {
+        const q = (d - 1.25) / 0.35;
+        p.x = 480;
+        p.sq = 1.05 - (1.05 - 0.62) * (1 - q) * (1 - q) * Math.cos(q * Math.PI * 1.6);
+      }
+    } else {
+      const e = t - 6.6;
+      p.x = 480;
+      p.sq = 1.05 + 0.045 * Math.sin(TAU * 2.2 * e) * Math.pow(clamp(1 - e / 0.9), 2);
+    }
+    return p;
+  }
+
+  // ---------- SADNESS ----------
+  function sad(t) {
+    const p = base();
+    p.sq = key(t, [[0, 1.05], [1.8, 0.84], [2.7, 0.95], [4.2, 0.79], [8, 0.77]]);
+    p.bend = key(t, [[0, 0], [1.8, 0.72], [2.7, 0.42], [4.2, 0.9], [8, 0.98]]);
+    p.lean = key(t, [[0, 0], [1.8, 0.07], [2.7, 0.03], [4.2, 0.09], [8, 0.1]]);
+    const ear = key(t, [[0, -0.08], [1.4, 1.0], [2.6, 0.72], [4.2, 1.1]]);
+    p.earL = ear;
+    p.earR = ear + key(t, [[0, 0], [2, 0.08]]);
+    p.bulge = key(t, [[0, 0], [1.8, 0.55], [4.2, 0.8], [8, 0.85]]);
+    p.x = key(t, [[0, 480], [4.4, 480], [5.5, 500], [6.6, 520]]);
+    const scoots = [[4.4, 5.5], [5.5, 6.6]];
+    for (const [s0, s1] of scoots) {
+      if (t > s0 && t < s1) {
+        const u = (t - s0) / (s1 - s0), env = Math.sin(Math.PI * u);
+        p.lean += 0.07 * env; p.sq += 0.035 * env; p.bend -= 0.12 * env;
+      }
+    }
+    for (const ti of [6.95, 7.3, 7.62]) {
+      const d = t - ti;
+      const pu = d < 0 ? Math.exp(-(d / 0.05) * (d / 0.05)) : Math.exp(-d / 0.14);
+      p.jsq += 0.03 * pu; p.jbend -= 0.07 * pu;
+      p.jeL -= 0.12 * pu; p.jeR -= 0.1 * pu;
+    }
+    p.jsq += 0.012 * Math.sin(TAU * t / 2.6) * sstep(0, 1, t) * sstep(8, 7, t);
+    return p;
+  }
+
+  // ---------- FEAR ----------
+  function fear(t) {
+    const p = base();
+    p.x = key(t, [[0, 520], [0.36, 498, 'o'], [1.0, 498], [1.35, 482, 'o'], [1.6, 482],
+                  [1.95, 466, 'o'], [2.4, 466], [3.5, 476], [4.0, 476], [4.25, 456, 'o'],
+                  [6.4, 456], [6.95, 480], [7, 480]]);
+    p.lift = key(t, [[0, 0], [0.13, 26, 'o'], [0.36, 0, 'i'], [1.0, 0], [1.17, 9, 'o'],
+                     [1.35, 0, 'i'], [1.6, 0], [1.77, 8, 'o'], [1.95, 0, 'i'], [4.0, 0],
+                     [4.12, 14, 'o'], [4.25, 0, 'i']]);
+    p.sq = key(t, [[0, 0.77], [0.13, 1.28, 'sn'], [0.36, 1.1], [0.46, 0.74, 'o'], [0.9, 0.8],
+                   [2.4, 0.8], [3.5, 0.92], [4.0, 0.92], [4.12, 0.72, 'sn'], [4.4, 0.7],
+                   [5.4, 0.72], [5.85, 0.88], [6.9, 1.0], [7, 1]]);
+    p.pinch = key(t, [[0, 0], [0.13, 0.3], [0.5, 1], [2.4, 1], [3.5, 0.55], [4.0, 0.55],
+                      [4.12, 1.25, 'sn'], [5.4, 1.2], [6.0, 0.25], [6.9, 0]]);
+    p.bulge = key(t, [[0, 0.85], [0.13, 0.1, 'sn'], [0.5, 0.15], [5.4, 0.15], [6.9, 0]]);
+    p.lean = key(t, [[0, 0.1], [0.13, -0.06, 'sn'], [0.5, -0.2], [2.4, -0.2], [3.5, 0.12],
+                     [4.0, 0.12], [4.12, -0.28, 'sn'], [5.4, -0.26], [5.9, 0]]);
+    p.bend = key(t, [[0, 0.98], [0.13, -0.15, 'sn'], [0.5, -0.35], [2.4, -0.35], [3.5, 0.32],
+                     [4.0, 0.32], [4.12, -0.45, 'sn'], [5.4, -0.42], [5.9, 0]]);
+    const ear = key(t, [[0, 1.1], [0.13, -0.4, 'sn'], [0.6, 0.3], [2.4, 0.3], [3.5, 0.0],
+                        [4.0, 0], [4.12, 0.4, 'sn'], [5.4, 0.4], [5.9, 0.25], [7, 0.25]]);
+    p.earL = ear;
+    p.earR = ear + key(t, [[0, 0.08], [0.13, 0]]);
+    p.earRot = key(t, [[0, 0], [0.13, 0], [0.6, -0.55], [2.4, -0.55], [3.5, 0.15], [4.0, 0.15],
+                       [4.12, -0.7, 'sn'], [5.4, -0.65], [5.9, 0]]);
+
+    const tr = key(t, [[0, 0], [0.4, 1], [2.4, 1], [3.3, 0.35], [4.0, 0.35], [4.12, 1.3],
+                       [5.4, 1.1], [5.85, 0]]);
+    p.jx = tr * 2.0 * Math.sin(TAU * 16 * t);
+    p.jsq = tr * 0.012 * Math.sin(TAU * 21 * t + 1);
+    p.jbend = tr * 0.025 * Math.sin(TAU * 12 * t + 2);
+    p.jeL = tr * 0.09 * Math.sin(TAU * 18 * t);
+    p.jeR = tr * 0.09 * Math.sin(TAU * 17 * t + 1.3);
+
+    if (t > 5.85 && t < 6.45) {
+      const u = (t - 5.85) / 0.6;
+      const env = Math.pow(Math.sin(Math.PI * u), 2) * (1 - 0.5 * u);
+      const ph = TAU * 5 * (t - 5.85);
+      p.jlean += 0.1 * Math.sin(ph) * env;
+      p.jbend += 0.3 * Math.sin(ph - 1) * env;
+      p.jeL += 0.4 * env * Math.sin(ph - 2);
+      p.jeR += 0.4 * env * Math.sin(ph - 2.5);
+      p.jsq += 0.02 * env * Math.sin(2 * ph);
+    }
+    if (t > 6.4 && t < 6.95) {
+      const u = (t - 6.4) / 0.55;
+      p.lean += 0.06 * Math.sin(Math.PI * u);
+    }
+    return p;
+  }
+
+  function pose(t) {
+    t = ((t % T) + T) % T;
+    if (t < 2) return rest(t);
+    if (t < 9.5) return joy(t - 2);
+    if (t < 17.5) return sad(t - 9.5);
+    return fear(t - 17.5);
+  }
+
+  function widthOf(p) {
+    return W * Math.pow(Math.max(p.sq, 0.3), -0.75) * (1 - 0.2 * p.pinch);
+  }
+
+  // ---------- secondary motion + particles ----------
+  const sim = { eL: 0, vL: 0, eR: 0, vR: 0, b: 0, vb: 0, pl: 0, ptw: 0, top: [480, 250] };
+  const parts = [];
+
+  function emitDust(x, w, v) {
+    const n = Math.min(26, Math.round(v / 35));
+    for (let i = 0; i < n; i++) {
+      const side = i % 2 ? 1 : -1;
+      parts.push({
+        x: x + side * w * (0.3 + Math.random() * 0.2), y: GY - 2,
+        vx: side * (40 + Math.random() * 120) * Math.min(1.6, v / 600),
+        vy: -(10 + Math.random() * 50),
+        r: 2 + Math.random() * 4, gr: 6 + Math.random() * 6,
+        life: 0, max: 0.6 + Math.random() * 0.6, a: 0.55
+      });
+    }
+  }
+  function emitPuff(x, y, n, spd) {
+    for (let i = 0; i < n; i++) {
+      parts.push({
+        x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 10,
+        vx: (Math.random() - 0.5) * 50 * spd, vy: -(20 + Math.random() * 30) * spd,
+        r: 2 + Math.random() * 2.5, gr: 5 + Math.random() * 4,
+        life: 0, max: 1.2 + Math.random() * 0.6, a: 0.5
+      });
+    }
+  }
+  function updateParts(dt) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const q = parts[i];
+      q.life += dt;
+      if (q.life >= q.max) { parts.splice(i, 1); continue; }
+      q.x += q.vx * dt; q.y += q.vy * dt;
+      q.vx *= Math.exp(-3 * dt); q.vy *= Math.exp(-2 * dt);
+      q.vy -= 4 * dt;
+      q.r += q.gr * dt;
+    }
+  }
+
+  const EVENTS = [[12.3, 'sigh'], [17.56, 'startle']];
+  const STEP = 1 / 120;
+
+  function step(t) {
+    const q = pose(t);
+    const e = 1 / 40;
+    const f = tt => {
+      const r = pose(tt), h = H * r.sq;
+      return [r.x + h * 0.8 * Math.sin(r.lean + r.bend * 0.5), r.lift + h];
+    };
+    const a0 = f(t - e), a1 = f(t), a2 = f(t + e);
+    const ax = clamp((a0[0] - 2 * a1[0] + a2[0]) / (e * e), -9000, 9000);
+    const ay = clamp((a0[1] - 2 * a1[1] + a2[1]) / (e * e), -9000, 9000);
+
+    sim.vL += (-170 * sim.eL - 9 * sim.vL + 0.017 * ay) * STEP; sim.eL += sim.vL * STEP;
+    sim.vR += (-150 * sim.eR - 8 * sim.vR + 0.019 * ay) * STEP; sim.eR += sim.vR * STEP;
+    sim.vb += (-120 * sim.b - 9 * sim.vb - 0.012 * ax) * STEP; sim.b += sim.vb * STEP;
+    sim.eL = clamp(sim.eL, -0.7, 1); sim.eR = clamp(sim.eR, -0.7, 1);
+    sim.b = clamp(sim.b, -0.35, 0.35);
+
+    if (sim.pl > 1 && q.lift <= 1) {
+      const v = (sim.pl - q.lift) / STEP;
+      if (v > 100) emitDust(q.x, widthOf(q), v);
+    }
+    sim.pl = q.lift;
+
+    const tw = ((t % T) + T) % T;
+    for (const [et, type] of EVENTS) {
+      const hit = sim.ptw <= tw ? (et > sim.ptw && et <= tw) : (et > sim.ptw || et <= tw);
+      if (hit) {
+        if (type === 'sigh') emitPuff(sim.top[0], sim.top[1], 10, 1);
+        else emitPuff(sim.top[0], sim.top[1], 7, 1.8);
+      }
+    }
+    sim.ptw = tw;
+    updateParts(STEP);
+  }
+
+  // ---------- drawing ----------
+  function drawBG() {
+    const g = ctx.createLinearGradient(0, 0, 0, GY);
+    g.addColorStop(0, '#f5eddd'); g.addColorStop(1, '#e8dbc1');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 960, GY);
+    const f = ctx.createLinearGradient(0, GY, 0, 540);
+    f.addColorStop(0, '#d8c39c'); f.addColorStop(1, '#c6ad85');
+    ctx.fillStyle = f; ctx.fillRect(0, GY, 960, 540 - GY);
+    ctx.fillStyle = 'rgba(110,85,55,0.2)'; ctx.fillRect(0, GY - 1, 960, 2);
+    const pool = ctx.createRadialGradient(480, GY + 20, 10, 480, GY + 20, 330);
+    pool.addColorStop(0, 'rgba(255,248,230,0.35)'); pool.addColorStop(1, 'rgba(255,248,230,0)');
+    ctx.fillStyle = pool; ctx.fillRect(0, GY, 960, 540 - GY);
+    const v = ctx.createRadialGradient(480, 290, 220, 480, 290, 640);
+    v.addColorStop(0, 'rgba(70,50,30,0)'); v.addColorStop(1, 'rgba(70,50,30,0.22)');
+    ctx.fillStyle = v; ctx.fillRect(0, 0, 960, 540);
+  }
+
+  function fillPoly(pts, style) {
+    ctx.fillStyle = style;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath(); ctx.fill();
+  }
+
+  function drawSack(p) {
+    const sq = p.sq + p.jsq;
+    const h = H * sq;
+    const w = W * Math.pow(Math.max(sq, 0.3), -0.75) * (1 - 0.2 * p.pinch);
+    const lean = p.lean + p.jlean;
+    const bend = clamp(p.bend + sim.b + p.jbend, -1.1, 1.1);
+    const N = 32, C = [], L = [], R = [], A = [];
+    const ang = s => lean * sstep(0.05, 0.45, s) + bend * s * s;
+    let cx = 0, cy = 0;
+    for (let i = 0; i <= N; i++) {
+      const s = i / N;
+      if (i > 0) {
+        const am = ang((i - 0.5) / N);
+        cx += Math.sin(am) * h / N; cy -= Math.cos(am) * h / N;
+      }
+      const a = ang(s);
+      const prof = 0.86 + 0.14 * Math.sin(Math.PI * (s * 0.8 + 0.1)) - 0.1 * s * s
+                 + p.bulge * 0.28 * (1 - s) * (1 - s);
+      const hw = w * prof / 2, nx = -Math.cos(a), ny = -Math.sin(a);
+      C.push([cx, cy]); L.push([cx + nx * hw, cy + ny * hw]); R.push([cx - nx * hw, cy - ny * hw]);
+      A.push(a);
+    }
+    const at = (arr, s) => {
+      const f = clamp(s) * N, i = Math.min(N - 1, Math.floor(f));
+      return lerp2(arr[i], arr[i + 1], f - i);
+    };
+
+    // ears
+    const CL = L[N], CR = R[N], a1 = A[N];
+    const QL = lerp2(CL, CR, 0.3), QR = lerp2(CL, CR, 0.7);
+    const eLen = H * 0.2;
+    const ear = (C0, Q0, d, side) => {
+      const spread = 0.45 + d * 1.9;
+      let th = a1 + side * spread;
+      const g = clamp(d, 0, 1.2) * 0.5;
+      th = th + (side * 2.8 - th) * g;
+      th += p.earRot;
+      const th0 = a1 + (th - a1) * 0.4;
+      const m = lerp2(C0, Q0, 0.5);
+      const Tp = [m[0] + Math.sin(th0) * eLen * 0.4 + Math.sin(th) * eLen * 0.65,
+                  m[1] - Math.cos(th0) * eLen * 0.4 - Math.cos(th) * eLen * 0.65];
+      const co = [C0[0] + Math.sin(th0) * eLen * 0.55, C0[1] - Math.cos(th0) * eLen * 0.55];
+      const ci = [Q0[0] + Math.sin(th0) * eLen * 0.4, Q0[1] - Math.cos(th0) * eLen * 0.4];
+      return { T: Tp, co, ci };
+    };
+    const dL = clamp(p.earL + sim.eL + p.jeL, -0.55, 1.45);
+    const dR = clamp(p.earR + sim.eR + p.jeR, -0.55, 1.45);
+    const eL = ear(CL, QL, dL, -1), eR = ear(QR, CR, dR, 1);
+    const down = [-Math.sin(a1), Math.cos(a1)];
+    const mq = lerp2(QL, QR, 0.5);
+    const topCtrl = [mq[0] + down[0] * 6, mq[1] + down[1] * 6];
+
+    const path = new Path2D();
+    path.moveTo(0, 2);
+    path.quadraticCurveTo(L[0][0], L[0][1], L[3][0], L[3][1]);
+    for (let i = 4; i <= N; i++) path.lineTo(L[i][0], L[i][1]);
+    path.quadraticCurveTo(eL.co[0], eL.co[1], eL.T[0], eL.T[1]);
+    path.quadraticCurveTo(eL.ci[0], eL.ci[1], QL[0], QL[1]);
+    path.quadraticCurveTo(topCtrl[0], topCtrl[1], QR[0], QR[1]);
+    path.quadraticCurveTo(eR.ci[0], eR.ci[1], eR.T[0], eR.T[1]);
+    path.quadraticCurveTo(eR.co[0], eR.co[1], CR[0], CR[1]);
+    for (let i = N - 1; i >= 3; i--) path.lineTo(R[i][0], R[i][1]);
+    path.quadraticCurveTo(R[0][0], R[0][1], 0, 2);
+    path.closePath();
+
+    ctx.fillStyle = '#efe3c8';
+    ctx.fill(path);
+
+    ctx.save();
+    ctx.clip(path);
+
+    // printed stripes
+    const band = (s1, s2, col) => {
+      const pts = [];
+      for (let k = 0; k <= 4; k++) {
+        const s = lerp(s1, s2, k / 4), c = at(C, s), l = at(L, s);
+        pts.push([c[0] + (l[0] - c[0]) * 1.25, c[1] + (l[1] - c[1]) * 1.25]);
+      }
+      for (let k = 4; k >= 0; k--) {
+        const s = lerp(s1, s2, k / 4), c = at(C, s), r = at(R, s);
+        pts.push([c[0] + (r[0] - c[0]) * 1.25, c[1] + (r[1] - c[1]) * 1.25]);
+      }
+      fillPoly(pts, col);
+    };
+    band(0.33, 0.37, 'rgba(172,72,56,0.85)');
+    band(0.405, 0.435, 'rgba(62,100,150,0.8)');
+
+    // shading on right side
+    const sh1 = [], sh2 = [];
+    for (let i = 0; i <= N; i++) sh1.push(R[i]);
+    for (let i = N; i >= 0; i--) sh1.push(lerp2(C[i], R[i], 0.35));
+    fillPoly(sh1, 'rgba(110,75,40,0.12)');
+    for (let i = 0; i <= N; i++) sh2.push(R[i]);
+    for (let i = N; i >= 0; i--) sh2.push(lerp2(C[i], R[i], 0.75));
+    fillPoly(sh2, 'rgba(110,75,40,0.1)');
+    // highlight on left
+    const hl = [];
+    const i0 = Math.round(0.12 * N), i1 = Math.round(0.9 * N);
+    for (let i = i0; i <= i1; i++) hl.push(lerp2(C[i], L[i], 0.82));
+    for (let i = i1; i >= i0; i--) hl.push(lerp2(C[i], L[i], 0.5));
+    fillPoly(hl, 'rgba(255,255,255,0.2)');
+    // settled weight at the bottom
+    const bg = ctx.createLinearGradient(0, 5, 0, -40);
+    bg.addColorStop(0, 'rgba(90,60,30,0.2)'); bg.addColorStop(1, 'rgba(90,60,30,0)');
+    ctx.fillStyle = bg; ctx.fillRect(-220, -40, 440, 46);
+
+    // squash wrinkles
+    const wa = clamp((0.96 - sq) * 3.5);
+    if (wa > 0.01) {
+      ctx.strokeStyle = 'rgba(95,70,45,' + (0.4 * wa).toFixed(3) + ')';
+      ctx.lineWidth = 2; ctx.lineCap = 'round';
+      for (const s of [0.22, 0.4, 0.58]) {
+        for (const side of [L, R]) {
+          const a = at(side, s), c0 = at(C, s + 0.03), c1 = at(C, s - 0.02);
+          const e0 = at(side, s + 0.03), e1 = at(side, s - 0.02);
+          const end = lerp2(c0, e0, 0.55), ctl = lerp2(c1, e1, 0.8);
+          ctx.beginPath(); ctx.moveTo(a[0], a[1]);
+          ctx.quadraticCurveTo(ctl[0], ctl[1], end[0], end[1]); ctx.stroke();
+        }
+      }
+    }
+
+    // stitched seam near the top
+    const sl = at(L, 0.93), sr = at(R, 0.93), sc = at(C, 0.93);
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = 'rgba(110,80,50,0.45)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(sl[0], sl[1]);
+    ctx.quadraticCurveTo(sc[0] + down[0] * 3, sc[1] + down[1] * 3, sr[0], sr[1]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = '#5a4531'; ctx.lineWidth = 3.2;
+    ctx.stroke(path);
+
+    return C[N];
+  }
+
+  function drawParts() {
+    for (const q of parts) {
+      const a = q.a * Math.pow(1 - q.life / q.max, 1.5);
+      ctx.fillStyle = 'rgba(255,251,242,' + a.toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, TAU); ctx.fill();
+    }
+  }
+
+  function render(t) {
+    const p = pose(t);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawBG();
+    const px = p.x + p.jx;
+    const w = widthOf(p);
+    const s = 1 / (1 + p.lift / 110);
+    ctx.fillStyle = 'rgba(80,55,30,' + (0.22 * s).toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.ellipse(px, GY + 3, w * 0.62 * s * (1 + 0.25 * p.bulge), 10 * s, 0, 0, TAU);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(px, GY - p.lift);
+    if (p.rot) {
+      const hc = H * (p.sq + p.jsq) * 0.5;
+      ctx.translate(0, -hc); ctx.rotate(p.rot); ctx.translate(0, hc);
+    }
+    const top = drawSack(p);
+    ctx.restore();
+    if (!p.rot) sim.top = [px + top[0], GY - p.lift + top[1]];
+    drawParts();
+  }
+
+  // ---------- loop ----------
+  let last = null, acc = 0, simT = 0;
+  function frame(now) {
+    if (last === null) last = now;
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    acc += dt;
+    while (acc >= STEP) { step(simT); simT += STEP; acc -= STEP; }
+    render(simT);
+    requestAnimationFrame(frame);
+  }
+  render(0);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

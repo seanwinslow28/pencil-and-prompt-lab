@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title></title>
+<style>
+  html,body{margin:0;padding:0;width:100%;height:100%;background:#d5d0c4;}
+  body{display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  #stage{width:960px;height:540px;box-shadow:0 12px 34px rgba(0,0,0,.30);}
+  canvas{display:block;width:960px;height:540px;}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<script>
+(function(){
+'use strict';
+
+/* ---------------------------------------------------------------
+   A pencil test: an old man with a bad right leg and a walking
+   stick, shuffling in place. 24 rough drawings, shot on twos.
+   --------------------------------------------------------------- */
+
+var W=960,H=540;
+var cv=document.getElementById('c');
+var DPR=Math.min(2,window.devicePixelRatio||1);
+cv.width=W*DPR; cv.height=H*DPR;
+var ctx=cv.getContext('2d');
+
+/* ---------- seeded noise (per drawing, so the line boils) ---------- */
+function mul(a){return function(){a|=0;a=a+0x6D2B79F5|0;var t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+var FR=0,sid=0;
+function rnd(k){return mul((FR*9176+k*7919+13)|0);}
+
+/* ---------- paper grain (baked once) ---------- */
+var grain=document.createElement('canvas');
+grain.width=W+16; grain.height=H+16;
+(function(){
+  var g=grain.getContext('2d'),r=mul(20250927),i,x,y;
+  for(i=0;i<46000;i++){
+    x=r()*(W+16); y=r()*(H+16);
+    g.fillStyle='rgba(118,106,88,'+(0.02+r()*0.07).toFixed(3)+')';
+    g.fillRect(x,y,1+(r()<0.14?1:0),1);
+  }
+  for(i=0;i<150;i++){
+    x=r()*(W+16); y=r()*(H+16);
+    g.strokeStyle='rgba(140,128,106,0.09)'; g.lineWidth=1;
+    g.beginPath(); g.moveTo(x,y); g.lineTo(x+(r()*2-1)*10,y+(r()*2-1)*10); g.stroke();
+  }
+})();
+
+/* ---------- rig constants ---------- */
+var GX=480, GY=430, HIPY0=311;
+var THIGH=57, SHIN=59, UPA=47, FOA=45, CANE=128;
+
+/* ---------- keyframes (t = phase 0..1 of one full cycle) ---------- */
+var HIPK=[{t:0,x:0,y:0},{t:0.10,x:1.5,y:5},{t:0.30,x:0.5,y:-1},{t:0.48,x:-1,y:2},
+          {t:0.62,x:-1.5,y:9},{t:0.78,x:0,y:11.5},{t:0.92,x:1.5,y:6}];
+var TRK=[{t:0,l:0.245},{t:0.22,l:0.215},{t:0.45,l:0.25},{t:0.62,l:0.315},{t:0.80,l:0.345},{t:0.93,l:0.285}];
+var HEADK=[{t:0,a:0.02,o:0},{t:0.20,a:0.0,o:-1},{t:0.48,a:0.03,o:1},{t:0.70,a:0.075,o:3},{t:0.88,a:0.05,o:2}];
+
+/* good leg (near) : long stance, real heel-toe roll */
+var GOODK=[{t:0.00,x:28,y:-13,f:-16},{t:0.10,x:19,y:-12,f:-2},{t:0.22,x:8,y:-12.5,f:0},
+           {t:0.40,x:-8,y:-12.5,f:1},{t:0.55,x:-21.5,y:-16,f:10},{t:0.62,x:-28,y:-22,f:32},
+           {t:0.70,x:-22,y:-36,f:22},{t:0.80,x:-2,y:-42,f:4},{t:0.88,x:16,y:-34,f:-10},
+           {t:0.95,x:29,y:-22,f:-18}];
+/* bad leg (far) : short flat-footed step, stiff knee, dragging toe */
+var BADK=[{t:0.10,x:-25,y:-18,f:12},{t:0.24,x:-18,y:-20,f:8},{t:0.38,x:-6,y:-21,f:4},
+          {t:0.48,x:6,y:-16,f:2},{t:0.55,x:14,y:-12.5,f:1},{t:0.70,x:0.5,y:-12.5,f:0},
+          {t:0.88,x:-15.7,y:-12.5,f:2},{t:0.98,x:-24.7,y:-15,f:9}];
+/* stick tip */
+var CANEK=[{t:0.08,x:4,y:-10},{t:0.22,x:22,y:-16},{t:0.36,x:44,y:-8},{t:0.45,x:49,y:-4},
+           {t:0.50,x:50,y:-1},{t:0.66,x:35.6,y:-1},{t:0.84,x:19.4,y:-1},{t:0.98,x:6.8,y:-1.5}];
+/* stick hand target (relative to hip) */
+var HANDK=[{t:0.14,x:2,y:-12},{t:0.30,x:16,y:-14},{t:0.42,x:26,y:-12},{t:0.50,x:30,y:-10},
+           {t:0.70,x:18,y:-8},{t:0.90,x:4,y:-6},{t:0.99,x:-2,y:-6}];
+
+/* ---------- shapes (local, character faces +x) ---------- */
+var TOR=[[-12,6],[-18,-18],[-24,-44],[-23,-66],[-15,-83],[-4,-90],[8,-86],[15,-70],
+         [21,-52],[24,-34],[22,-14],[17,3],[10,10],[-2,12]];
+var HEADSH=[[-4,-25],[10,-22],[19,-14],[16,-7],[21,-2],[31,7],[21,9],[23,13],[16,16],
+            [19,21],[10,26],[-2,27],[-14,22],[-22,10],[-25,-6],[-18,-20]];
+var SHOE=[[-13,3],[-14.5,9],[-9,12.5],[2,13],[13,12.5],[21,10],[23,5],[18,1],[8,-2],[-2,-1]];
+
+/* ---------- maths ---------- */
+function samp(keys,t){
+  var n=keys.length,i=0;
+  while(i<n&&keys[i].t<=t)i++;
+  var i1=(i-1+n)%n,i2=i%n,i0=(i1-1+n)%n,i3=(i2+1)%n;
+  var t1=keys[i1].t,t2=keys[i2].t; if(t2<=t1)t2+=1;
+  var tt=t; if(tt<t1)tt+=1;
+  return {u:(tt-t1)/(t2-t1),i0:i0,i1:i1,i2:i2,i3:i3};
+}
+function chan(keys,t,k){
+  var s=samp(keys,t),p0=keys[s.i0][k],p1=keys[s.i1][k],p2=keys[s.i2][k],p3=keys[s.i3][k],u=s.u;
+  return 0.5*((2*p1)+(-p0+p2)*u+(2*p0-5*p1+4*p2-p3)*u*u+(-p0+3*p1-3*p2+p3)*u*u*u);
+}
+function ik(a,b,l1,l2,sgn){
+  var dx=b[0]-a[0],dy=b[1]-a[1],raw=Math.hypot(dx,dy)||0.001;
+  var ux=dx/raw,uy=dy/raw;
+  var d=Math.max(Math.abs(l1-l2)+0.6,Math.min(raw,l1+l2-0.6));
+  var aa=(l1*l1-l2*l2+d*d)/(2*d),h=Math.sqrt(Math.max(0,l1*l1-aa*aa));
+  return [a[0]+ux*aa+(-uy)*h*sgn, a[1]+uy*aa+(ux)*h*sgn];
+}
+function T(p,o,th){var c=Math.cos(th),s=Math.sin(th);return [o[0]+p[0]*c-p[1]*s,o[1]+p[0]*s+p[1]*c];}
+function TL(a,o,th){var r=[],i;for(i=0;i<a.length;i++)r.push(T(a[i],o,th));return r;}
+function mid(a,b,u){return [a[0]+(b[0]-a[0])*u,a[1]+(b[1]-a[1])*u];}
+function circPts(cx,cy,r,n){var o=[],i,a;for(i=0;i<n;i++){a=i/n*Math.PI*2;o.push([cx+Math.cos(a)*r,cy+Math.sin(a)*r]);}return o;}
+function arcPts(cx,cy,r,a0,a1,n){var o=[],i,a;for(i=0;i<=n;i++){a=a0+(a1-a0)*i/n;o.push([cx+Math.cos(a)*r,cy+Math.sin(a)*r]);}return o;}
+function tube(pts,ws){
+  var L=[],R=[],i,dx,dy,l,nx,ny;
+  for(i=0;i<pts.length;i++){
+    if(i===0){dx=pts[1][0]-pts[0][0];dy=pts[1][1]-pts[0][1];}
+    else if(i===pts.length-1){dx=pts[i][0]-pts[i-1][0];dy=pts[i][1]-pts[i-1][1];}
+    else {dx=pts[i+1][0]-pts[i-1][0];dy=pts[i+1][1]-pts[i-1][1];}
+    l=Math.hypot(dx,dy)||1; nx=-dy/l; ny=dx/l;
+    L.push([pts[i][0]+nx*ws[i],pts[i][1]+ny*ws[i]]);
+    R.push([pts[i][0]-nx*ws[i],pts[i][1]-ny*ws[i]]);
+  }
+  return {L:L,R:R};
+}
+
+/* ---------- pencil line ---------- */
+var ST={a:1,col:'60,56,64',jit:1,ghost:false};
+function pathSmooth(q,closed){
+  var i,m,mm;
+  ctx.beginPath();
+  if(q.length<3){ctx.moveTo(q[0][0],q[0][1]);ctx.lineTo(q[q.length-1][0],q[q.length-1][1]);return;}
+  if(closed){
+    m=[(q[q.length-1][0]+q[0][0])/2,(q[q.length-1][1]+q[0][1])/2];
+    ctx.moveTo(m[0],m[1]);
+    for(i=0;i<q.length;i++){
+      var n=(i+1)%q.length;
+      mm=[(q[i][0]+q[n][0])/2,(q[i][1]+q[n][1])/2];
+      ctx.quadraticCurveTo(q[i][0],q[i][1],mm[0],mm[1]);
+    }
+    ctx.closePath();
+  }else{
+    ctx.moveTo(q[0][0],q[0][1]);
+    for(i=1;i<q.length-1;i++){
+      mm=[(q[i][0]+q[i+1][0])/2,(q[i][1]+q[i+1][1])/2];
+      ctx.quadraticCurveTo(q[i][0],q[i][1],mm[0],mm[1]);
+    }
+    ctx.lineTo(q[q.length-1][0],q[q.length-1][1]);
+  }
+}
+function part(pts,o){
+  o=o||{};
+  var w=o.w||1.3, a=(o.a==null?1:o.a)*ST.a, j=(o.j==null?1:o.j)*ST.jit, ps=o.p||2, closed=!!o.closed;
+  var id=++sid,p,i,r,ox,oy,q;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  for(p=0;p<ps;p++){
+    r=rnd(id*31+p*7);
+    ox=(r()*2-1)*j*0.65; oy=(r()*2-1)*j*0.65;
+    q=[];
+    for(i=0;i<pts.length;i++) q.push([pts[i][0]+ox+(r()*2-1)*j,pts[i][1]+oy+(r()*2-1)*j]);
+    pathSmooth(q,closed);
+    ctx.lineWidth=w*(0.68+0.6*r());
+    ctx.strokeStyle='rgba('+ST.col+','+(a*(0.48+0.46*r())).toFixed(3)+')';
+    ctx.stroke();
+  }
+}
+function fillShape(pts,al){
+  if(ST.ghost)return;
+  ctx.save(); ctx.fillStyle='rgba(243,236,222,'+al+')';
+  pathSmooth(pts,true); ctx.fill(); ctx.restore();
+}
+
+/* ---------- pose ---------- */
+function buildPose(t){
+  var dip=chan(HIPK,t,'y'), swx=chan(HIPK,t,'x'), lean=chan(TRK,t,'l');
+  var hip=[GX+swx,HIPY0+dip];
+  var vy=dip-chan(HIPK,(t-0.045+1)%1,'y');
+
+  var gy=Math.min(GY+chan(GOODK,t,'y'),GY-11.5);
+  var by=Math.min(GY+chan(BADK,t,'y'),GY-11.5);
+  var gA=[GX+chan(GOODK,t,'x'),gy], gF=chan(GOODK,t,'f');
+  var bA=[GX+chan(BADK,t,'x'),by],  bF=chan(BADK,t,'f');
+  var gH=[hip[0]+3,hip[1]+2], bH=[hip[0]-4,hip[1]+1];
+  var gK=ik(gH,gA,THIGH,SHIN,-1), bK=ik(bH,bA,THIGH,SHIN,-1);
+
+  var shN=T([4,-84],hip,lean), shF=T([-3,-87],hip,lean);
+
+  var tip=[GX+chan(CANEK,t,'x'),Math.min(GY+chan(CANEK,t,'y'),GY-0.5)];
+  var tgt=[hip[0]+chan(HANDK,t,'x'),hip[1]+chan(HANDK,t,'y')];
+  var dx=tgt[0]-tip[0],dy=tgt[1]-tip[1],dl=Math.hypot(dx,dy)||1;
+  var hand=[tip[0]+dx/dl*CANE,tip[1]+dy/dl*CANE];
+  var elbN=ik(shN,hand,UPA,FOA,1);
+
+  var ph=2*Math.PI*(t+0.25);
+  var fh=[hip[0]+4+9*Math.sin(ph),hip[1]+4+4*Math.cos(ph)];
+  var elbF=ik(shF,fh,UPA,FOA,1);
+
+  var nod=chan(HEADK,t,'a'), push=chan(HEADK,t,'o');
+  var hc=T([5+push,-115],hip,lean);
+  return {t:t,hip:hip,lean:lean,vy:vy,
+    g:{h:gH,k:gK,a:gA,f:gF}, b:{h:bH,k:bK,a:bA,f:bF},
+    shN:shN,shF:shF,elbN:elbN,hand:hand,elbF:elbF,fh:fh,tip:tip,
+    head:{c:hc,ang:lean*0.35+nod}};
+}
+
+/* ---------- parts ---------- */
+function drawShoe(ank,f,am){
+  var th=f*Math.PI/180, wp=TL(SHOE,ank,th);
+  fillShape(wp,0.86);
+  part(wp,{w:1.35,a:am,closed:true,j:0.9});
+  part(TL([[-14.5,9],[-6,11.5],[8,11.5],[20.5,8.5]],ank,th),{w:1.7,a:am*0.95,p:2,j:0.7});
+  if(!ST.ghost){
+    part(TL([[1,-1],[5,5]],ank,th),{w:1,a:am*0.55,j:0.7});
+    part(TL([[8,-1.5],[10,4]],ank,th),{w:0.9,a:am*0.4,j:0.7});
+  }
+}
+function drawLeg(L,near){
+  var poly=[L.h,mid(L.h,L.k,0.45),L.k,mid(L.k,L.a,0.5),L.a];
+  var ws=near?[15,13,11.5,10.5,10]:[14,12,10.5,9.5,9];
+  var tb=tube(poly,ws), am=near?1:0.6;
+  fillShape(tb.L.concat(tb.R.slice().reverse()),0.8);
+  part(tb.L,{w:1.35,a:am});
+  part(tb.R,{w:1.35,a:am});
+  part([tb.L[4],mid(tb.L[4],tb.R[4],0.5),tb.R[4]],{w:1.15,a:am*0.8,j:0.8});
+  if(!ST.ghost){
+    part([mid(tb.R[2],tb.L[2],0.12),mid(tb.R[2],tb.L[2],0.42),mid(tb.R[2],tb.L[2],0.62)],{w:1,a:am*0.4,j:0.8});
+    part([mid(tb.R[3],tb.L[3],0.1),mid(tb.R[3],tb.L[3],0.45)],{w:0.95,a:am*0.3,j:0.8});
+  }
+  drawShoe(L.a,L.f,am);
+}
+function drawHand(p,ang,grip,am){
+  var loc=[[-5,-6],[3,-7],[7,-2],[7,4],[2,7],[-4,6],[-7,1]];
+  var wp=TL(loc,p,ang);
+  fillShape(wp,0.82);
+  part(wp,{w:1.25,a:am,closed:true,j:0.8});
+  if(!ST.ghost){
+    if(grip){ part(TL([[-4,-3],[5,-2]],p,ang),{w:1,a:am*0.6,j:0.6});
+              part(TL([[-4,1.5],[5,2.5]],p,ang),{w:1,a:am*0.6,j:0.6}); }
+    else { part(TL([[-3,2],[4,3]],p,ang),{w:1,a:am*0.55,j:0.6}); }
+  }
+}
+function drawArm(sh,el,hd,near,grip){
+  var poly=[sh,mid(sh,el,0.5),el,mid(el,hd,0.55),hd];
+  var ws=near?[12,10.5,9,8,7]:[11,9.5,8.3,7.4,6.6];
+  var tb=tube(poly,ws), am=near?1:0.6;
+  fillShape(tb.L.concat(tb.R.slice().reverse()),0.8);
+  part(tb.L,{w:1.3,a:am});
+  part(tb.R,{w:1.3,a:am});
+  part([tb.L[3],mid(tb.L[3],tb.R[3],0.5),tb.R[3]],{w:1.1,a:am*0.7,j:0.8});
+  if(!ST.ghost){
+    part([mid(tb.R[2],tb.L[2],0.1),mid(tb.R[2],tb.L[2],0.45)],{w:1,a:am*0.35,j:0.9});
+    part([mid(tb.R[2],tb.L[2],0.15),mid(tb.R[2],tb.L[2],0.55)],{w:0.9,a:am*0.25,j:1.1});
+  }
+  drawHand(hd,Math.atan2(hd[1]-el[1],hd[0]-el[0]),grip,am);
+}
+function drawCane(hand,tip){
+  var dx=hand[0]-tip[0],dy=hand[1]-tip[1],L=Math.hypot(dx,dy)||1;
+  var ux=dx/L,uy=dy/L,px=-uy,py=ux;
+  if(px>0){px=-px;py=-py;}
+  var shaft=[tip,
+    [tip[0]+ux*L*0.34+px*1.3,tip[1]+uy*L*0.34+py*1.3],
+    [tip[0]+ux*L*0.7+px*1.7,tip[1]+uy*L*0.7+py*1.7],
+    [hand[0]+ux*5,hand[1]+uy*5]];
+  part(shaft,{w:1.8,a:1,p:3,j:0.8});
+  var tp=[hand[0]+ux*7,hand[1]+uy*7];
+  part([tp,
+        [tp[0]+ux*7+px*3,tp[1]+uy*7+py*3],
+        [tp[0]+ux*7+px*10,tp[1]+uy*7+py*10],
+        [tp[0]+ux*2+px*13.5,tp[1]+uy*2+py*13.5],
+        [tp[0]-ux*3.5+px*11,tp[1]-uy*3.5+py*11]],{w:1.8,a:1,p:3,j:0.8});
+  if(!ST.ghost)
+    part([[tip[0]+ux*7-px*2,tip[1]+uy*7-py*2],[tip[0]+ux*7+px*2,tip[1]+uy*7+py*2]],{w:1.2,a:0.6,j:0.7});
+}
+function drawTorso(P){
+  var hip=P.hip,th=P.lean,t=P.t,i,y;
+  var hx=-2.5*Math.sin(2*Math.PI*(t+0.2));
+  var dy=Math.max(-3,Math.min(3,-P.vy*0.8));
+  var TT=[];
+  for(i=0;i<TOR.length;i++) TT.push((i>=11||i===0)?[TOR[i][0]+hx,TOR[i][1]+dy]:[TOR[i][0],TOR[i][1]]);
+  var wp=TL(TT,hip,th);
+  fillShape(wp,0.85);
+  part(wp,{w:1.4,a:1,closed:true,p:2});
+  part(TL([TT[1],TT[2],TT[3],TT[4]],hip,th),{w:1.75,a:0.85,p:2,j:0.9});
+  if(!ST.ghost){
+    part(TL([[7,-84],[13,-70],[7,-57],[3,-48]],hip,th),{w:1.3,a:0.8});
+    part(TL([[3,-48],[9,-40]],hip,th),{w:1.1,a:0.5});
+    part(TL(circPts(17,-47,1.7,6),hip,th),{w:1.1,a:0.7,closed:true,j:0.5});
+    part(TL(circPts(20,-33,1.7,6),hip,th),{w:1.1,a:0.7,closed:true,j:0.5});
+    part(TL([[9,-24],[19,-22]],hip,th),{w:1.1,a:0.6});
+    part(TL([[9,-20],[18,-18]],hip,th),{w:0.9,a:0.4});
+    for(i=0;i<4;i++){ y=-74+i*10; part(TL([[-22+i*0.8,y],[-13+i,y+7]],hip,th),{w:1,a:0.26,j:0.9}); }
+    part(TL([[14,-14],[22,-17]],hip,th),{w:1,a:0.33});
+    part(TL([[16,-8],[23,-11]],hip,th),{w:0.9,a:0.25});
+    part(TL([[-12+hx,6+dy],[-17+hx*1.6,12+dy],[-11+hx*1.6,15.5+dy]],hip,th),{w:1.25,a:0.75,j:1.1});
+  }
+}
+function drawHead(P){
+  var o=P.head.c,th=P.head.ang;
+  var wp=TL(HEADSH,o,th);
+  fillShape(wp,0.87);
+  part(wp,{w:1.45,a:1,closed:true,p:2,j:0.85});
+  part(TL([[19,-14],[16,-7],[21,-2],[31,7],[21,9]],o,th),{w:1.55,a:0.9,p:2,j:0.7});
+  if(!ST.ghost){
+    part(TL(arcPts(-7,1,6.5,-1.9,1.5,7),o,th),{w:1.2,a:0.8,j:0.8});
+    part(TL(arcPts(-7,1,3,-1.6,1.2,5),o,th),{w:1,a:0.45,j:0.7});
+    part(TL(circPts(13,-6,8.6,14),o,th),{w:1.3,a:0.9,closed:true,j:0.6});
+    part(TL([[4.6,-8],[-2,-6],[-7,-3.5]],o,th),{w:1.1,a:0.65,j:0.7});
+    part(TL([[21.5,-6],[24,-4.5]],o,th),{w:1.1,a:0.6,j:0.6});
+    part(TL([[9,-6],[13,-4.4],[17,-6.5]],o,th),{w:1.2,a:0.8,j:0.5});
+    part(TL([[8,-15],[14,-17.5],[20,-13]],o,th),{w:1.4,a:0.85,j:0.7});
+    part(TL([[11,0.5],[16,2.5]],o,th),{w:1,a:0.4,j:0.8});
+    part(TL([[19,8.5],[15,12],[9,16]],o,th),{w:1.5,a:0.9,j:0.7});
+    part(TL([[22,10],[18,14],[12,18]],o,th),{w:1.35,a:0.75,j:0.7});
+    part(TL([[14,20],[18,21.5]],o,th),{w:1,a:0.4,j:0.7});
+    var dr=Math.max(-3.5,Math.min(3.5,-P.vy*0.9));
+    part(TL([[-13,-21],[-18,-27+dr],[-22.5,-30+dr]],o,th),{w:1.2,a:0.7,j:1.1});
+    part(TL([[-2,-25],[1,-31+dr],[4,-34+dr]],o,th),{w:1.1,a:0.5,j:1.2});
+    part(TL([[-20,-12],[-26,-15+dr*0.6],[-29.5,-17+dr*0.6]],o,th),{w:1.2,a:0.6,j:1.1});
+    part(TL([[-16,19],[-20,15],[-22,9]],o,th),{w:1.1,a:0.5,j:0.9});
+  }
+}
+function drawFigure(P){
+  drawLeg(P.b,false);
+  drawArm(P.shF,P.elbF,P.fh,false,false);
+  drawLeg(P.g,true);
+  drawTorso(P);
+  part([T([-3,-86],P.hip,P.lean),T([-1,-95],P.hip,P.lean)],{w:1.2,a:0.6,j:0.8});
+  part([T([9,-84],P.hip,P.lean),T([12,-92],P.hip,P.lean)],{w:1.1,a:0.45,j:0.8});
+  drawHead(P);
+  drawArm(P.shN,P.elbN,P.hand,true,true);
+  drawCane(P.hand,P.tip);
+}
+
+/* ---------- underdrawing + ground ---------- */
+function drawConstruction(P){
+  var S=ST; ST={a:1,col:'96,116,158',jit:1.3,ghost:false};
+  part([[GX,150],[GX+1.5,290],[GX,438]],{w:1,a:0.07,j:1.6});
+  part(circPts(P.hip[0],P.hip[1],14,12),{w:1,a:0.1,closed:true,j:1.2});
+  var sm=mid(P.shN,P.shF,0.5);
+  part(circPts(sm[0],sm[1],15,12),{w:1,a:0.1,closed:true,j:1.2});
+  part(circPts(P.g.k[0],P.g.k[1],7,10),{w:1,a:0.09,closed:true,j:1.1});
+  part(circPts(P.b.k[0],P.b.k[1],6.5,10),{w:1,a:0.07,closed:true,j:1.1});
+  part(circPts(P.head.c[0],P.head.c[1],24,14),{w:1,a:0.07,closed:true,j:1.3});
+  part([[P.head.c[0]-4,P.head.c[1]-22],sm,[P.hip[0]-2,P.hip[1]+4],
+        [(P.g.a[0]+P.b.a[0])/2,GY-4]],{w:1.7,a:0.12,j:1.6});
+  ST=S;
+}
+function drawGround(P){
+  var S=ST,i,r=rnd(404);
+  ST={a:1,col:'92,104,130',jit:1.4,ghost:false};
+  part([[150,GY+1],[320,GY-1.5],[500,GY+1.5],[680,GY-1],[830,GY+1]],{w:1.2,a:0.2,j:1.7});
+  ST={a:1,col:'70,66,72',jit:1,ghost:false};
+  var cs=[P.g.a,P.b.a,P.tip];
+  for(i=0;i<cs.length;i++){
+    if(cs[i][1]>GY-22){
+      var x=cs[i][0], al=0.22*(1-(GY-22-cs[i][1]+22)/24);
+      part([[x-13,GY+3],[x+11,GY+2]],{w:1.1,a:0.18,j:1.1});
+      part([[x-8,GY+6],[x+14,GY+5]],{w:1,a:0.12,j:1.2});
+    }
+  }
+  ST=S;
+}
+
+/* ---------- paper & peg bar ---------- */
+function drawPaper(){
+  var r=rnd(5),i;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle='#f1eadb'; ctx.fillRect(0,0,W,H);
+  var g=ctx.createRadialGradient(470,250,110,470,250,630);
+  g.addColorStop(0,'rgba(255,252,243,0.50)');
+  g.addColorStop(1,'rgba(192,179,153,0.30)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=0.5+0.3*r();
+  ctx.drawImage(grain,-8+Math.floor(r()*16)-8,-8+Math.floor(r()*16)-8);
+  ctx.globalAlpha=1;
+  for(i=0;i<16;i++){
+    ctx.fillStyle='rgba(88,78,62,'+(0.05+r()*0.1).toFixed(3)+')';
+    ctx.fillRect(r()*W,r()*H,1+(r()<0.3?1:0),1);
+  }
+}
+function holePath(x,y,w,h){
+  var rr=h/2;
+  ctx.beginPath();
+  ctx.moveTo(x-w/2+rr,y-h/2);
+  ctx.lineTo(x+w/2-rr,y-h/2);
+  ctx.arc(x+w/2-rr,y,rr,-Math.PI/2,Math.PI/2);
+  ctx.lineTo(x-w/2+rr,y+h/2);
+  ctx.arc(x-w/2+rr,y,rr,Math.PI/2,-Math.PI/2);
+  ctx.closePath();
+}
+function drawPegs(){
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  var y=506, i, hs=[[480,17,13],[480-118,32,12],[480+118,32,12]];
+  for(i=0;i<hs.length;i++){
+    var x=hs[i][0],w=hs[i][1],h=hs[i][2];
+    ctx.save();
+    holePath(x,y,w,h);
+    var g=ctx.createLinearGradient(0,y-h/2,0,y+h/2);
+    g.addColorStop(0,'#3f3b34'); g.addColorStop(0.65,'#615b4f'); g.addColorStop(1,'#7a7263');
+    ctx.fillStyle=g; ctx.fill();
+    ctx.strokeStyle='rgba(60,55,46,0.55)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.restore();
+    ctx.save();
+    holePath(x,y+2.2,w-1,h-1);
+    ctx.strokeStyle='rgba(255,250,236,0.30)'; ctx.lineWidth=1.3; ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* ---------- render one drawing ---------- */
+function render(t){
+  drawPaper();
+  var r=rnd(999);
+  var wx=(r()*2-1)*0.9, wy=(r()*2-1)*0.9, wr=(r()*2-1)*0.0022;
+  ctx.save();
+  ctx.translate(480+wx,300+wy); ctx.rotate(wr); ctx.translate(-480,-300);
+  ctx.translate(480,430); ctx.scale(1.3,1.3); ctx.translate(-480,-430);
+
+  var P=buildPose(t);
+  drawGround(P);
+
+  ST={a:0.15,col:'92,104,134',jit:1.2,ghost:true};
+  drawFigure(buildPose((t-1/24+1)%1));
+
+  drawConstruction(P);
+
+  ST={a:1,col:'60,56,64',jit:0.95,ghost:false};
+  drawFigure(P);
+
+  ctx.restore();
+  drawPegs();
+}
+
+/* ---------- flip it ---------- */
+var FPS=12,N=24,cur=-1;
+function frame(ts){
+  var i=Math.floor(ts/1000*FPS)%N;
+  if(i!==cur){cur=i;FR=i;sid=0;render(i/N);}
+  requestAnimationFrame(frame);
+}
+render(0);
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

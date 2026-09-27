@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title></title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#0b0b10;}
+  body{display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  #c{width:960px;height:540px;display:block;
+     image-rendering:pixelated;image-rendering:-moz-crisp-edges;image-rendering:crisp-edges;}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+'use strict';
+/* ============================================================
+   16-bit style fighter: idle -> straight punch -> idle (loop)
+   Internal framebuffer 240x135, integer-scaled 4x to 960x540.
+   Indexed color (51-entry palette), 1px sprite outlines,
+   discrete pose keyframes @60Hz ticks, verlet cloth, hitstop.
+   ============================================================ */
+
+/* ---------- framebuffer geometry ---------- */
+const VW=240, VH=135, MG=4, BW=VW+MG*2, BH=VH+MG*2;
+
+/* ---------- palette ---------- */
+const HEX=[
+ '#000000','#0e0a16','#ffdcb0','#e2a370','#a86646','#74402e',
+ '#5a72c0','#3a4e94','#222f62','#f2eee2','#c0b8a6','#8a8272',
+ '#453a58','#2a2338','#181425','#f45a58','#c02a3c','#781a2c',
+ '#f7d074','#c08e34','#7a5620','#ffffff','#fff0a8','#ffa848','#e0603c',
+ '#241a46','#3c2660','#5e3670','#8a4a72','#bd6a6a','#e39a68','#f6cb92',
+ '#fff4cc','#ffd884','#f0a898','#a06284','#6a4068','#4a3462','#33244a',
+ '#241a34','#55415c','#3b2c46','#271c32','#9a744c','#745336','#503824',
+ '#33243a','#dfb878','#ab8250','#6f5232','#513a22'];
+const NAMES=['none','out','sk0','sk1','sk2','sk3','pn0','pn1','pn2','wr0','wr1','wr2',
+ 'hr0','hr1','hr2','rd0','rd1','rd2','gd0','gd1','gd2','fx0','fx1','fx2','fx3',
+ 'sky0','sky1','sky2','sky3','sky4','sky5','sky6','sun0','sun1','cl0','cl1','cl2',
+ 'mt0','mt1','ct0','rf0','rf1','rf2','wd0','wd1','wd2','shd','st0','st1','st2','rp0'];
+const C={}; NAMES.forEach((n,i)=>C[n]=i);
+const PR=new Uint8Array(HEX.length*3);
+HEX.forEach((h,i)=>{PR[i*3]=parseInt(h.substr(1,2),16);PR[i*3+1]=parseInt(h.substr(3,2),16);PR[i*3+2]=parseInt(h.substr(5,2),16);});
+
+/* color triples [lit, mid, shade] */
+const SK=[C.sk0,C.sk1,C.sk2], SKF=[C.sk1,C.sk2,C.sk3];
+const PN=[C.pn0,C.pn1,C.pn2], PNF=[C.pn1,C.pn2,C.pn2];
+const WR=[C.wr0,C.wr1,C.wr2], WRF=[C.wr1,C.wr2,C.wr2];
+const HR=[C.hr0,C.hr1,C.hr2], GD=[C.gd0,C.gd1,C.gd2];
+const RD=[C.rd0,C.rd1,C.rd2], RDF=[C.rd1,C.rd2,C.rd2];
+
+/* ---------- buffers ---------- */
+const buf=new Uint8Array(BW*BH), spr=new Uint8Array(BW*BH);
+const skyL=new Uint8Array(BW*BH), frontL=new Uint8Array(BW*BH);
+
+/* ---------- canvases ---------- */
+const cv=document.getElementById('c'), cx=cv.getContext('2d');
+cx.imageSmoothingEnabled=false;
+const low=document.createElement('canvas'); low.width=VW; low.height=VH;
+const lc=low.getContext('2d');
+const img=lc.createImageData(VW,VH), D=img.data;
+
+/* ---------- raster primitives ---------- */
+function set(L,x,y,c){x=Math.round(x)+MG;y=Math.round(y)+MG;if(x<0||y<0||x>=BW||y>=BH)return;L[y*BW+x]=c;}
+function rect(L,x,y,w,h,c){x=Math.round(x);y=Math.round(y);for(let j=0;j<h;j++)for(let i=0;i<w;i++)set(L,x+i,y+j,c);}
+const BAY=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+function bay(x,y){return BAY[(((y&3)<<2)|(x&3))];}
+const LX=-0.42,LY=-0.60,LZ=0.68;
+
+/* shaded capsule (tapered) */
+function cap(L,x0,y0,x1,y1,r0,r1,c){
+  const mnx=Math.floor(Math.min(x0-r0,x1-r1))-1, mxx=Math.ceil(Math.max(x0+r0,x1+r1))+1;
+  const mny=Math.floor(Math.min(y0-r0,y1-r1))-1, mxy=Math.ceil(Math.max(y0+r0,y1+r1))+1;
+  const dx=x1-x0, dy=y1-y0, dd=dx*dx+dy*dy||1e-6;
+  for(let y=mny;y<=mxy;y++)for(let x=mnx;x<=mxx;x++){
+    const ax=x+0.5-x0, ay=y+0.5-y0;
+    let t=(ax*dx+ay*dy)/dd; t=t<0?0:t>1?1:t;
+    const ox=ax-dx*t, oy=ay-dy*t, r=r0+(r1-r0)*t;
+    const d=Math.sqrt(ox*ox+oy*oy);
+    if(d<=r){
+      const nx=ox/r, ny=oy/r;
+      const nz=Math.sqrt(Math.max(0,1-nx*nx-ny*ny));
+      const lam=nx*LX+ny*LY+nz*LZ;
+      set(L,x,y, lam>0.74?c[0] : lam>0.34?c[1] : c[2]);
+    }
+  }
+}
+/* flat capsule (effects) */
+function fcap(L,x0,y0,x1,y1,r0,r1,c){
+  const mnx=Math.floor(Math.min(x0-r0,x1-r1))-1, mxx=Math.ceil(Math.max(x0+r0,x1+r1))+1;
+  const mny=Math.floor(Math.min(y0-r0,y1-r1))-1, mxy=Math.ceil(Math.max(y0+r0,y1+r1))+1;
+  const dx=x1-x0, dy=y1-y0, dd=dx*dx+dy*dy||1e-6;
+  for(let y=mny;y<=mxy;y++)for(let x=mnx;x<=mxx;x++){
+    const ax=x+0.5-x0, ay=y+0.5-y0;
+    let t=(ax*dx+ay*dy)/dd; t=t<0?0:t>1?1:t;
+    const ox=ax-dx*t, oy=ay-dy*t, r=r0+(r1-r0)*t;
+    if(ox*ox+oy*oy<=r*r) set(L,x,y,c);
+  }
+}
+/* shaded ellipse */
+function ell(L,cx0,cy0,rx,ry,c){
+  for(let y=Math.floor(cy0-ry)-1;y<=Math.ceil(cy0+ry)+1;y++)
+  for(let x=Math.floor(cx0-rx)-1;x<=Math.ceil(cx0+rx)+1;x++){
+    const nx=(x+0.5-cx0)/rx, ny=(y+0.5-cy0)/ry;
+    const q=nx*nx+ny*ny;
+    if(q<=1){
+      const nz=Math.sqrt(Math.max(0,1-q));
+      const lam=nx*LX+ny*LY+nz*LZ;
+      set(L,x,y, lam>0.74?c[0] : lam>0.34?c[1] : c[2]);
+    }
+  }
+}
+function fdisc(L,cx0,cy0,r,c){
+  for(let y=Math.floor(cy0-r);y<=Math.ceil(cy0+r);y++)
+  for(let x=Math.floor(cx0-r);x<=Math.ceil(cx0+r);x++){
+    const dx=x+0.5-cx0, dy=y+0.5-cy0;
+    if(dx*dx+dy*dy<=r*r) set(L,x,y,c);
+  }
+}
+function ring(L,cx0,cy0,rx,ry,c){
+  const st=Math.max(10,Math.round(rx*7));
+  for(let i=0;i<st;i++){
+    const a=i/st*Math.PI*2;
+    set(L,cx0+Math.cos(a)*rx,cy0+Math.sin(a)*ry,c);
+  }
+}
+function dash(L,x0,y0,x1,y1,c,skip){
+  const n=Math.ceil(Math.hypot(x1-x0,y1-y0));
+  for(let i=0;i<=n;i++){
+    if(i%(skip+1)===0 || i%(skip+1)===1){
+      set(L,x0+(x1-x0)*i/n, y0+(y1-y0)*i/n, c);
+    }
+  }
+}
+/* 1px outline around non-empty pixels of a sprite layer (8-neighbour) */
+function outlineL(L){
+  const todo=[];
+  for(let y=1;y<BH-1;y++){
+    const row=y*BW;
+    for(let x=1;x<BW-1;x++){
+      const i=row+x; if(L[i]) continue;
+      if(L[i-1]||L[i+1]||L[i-BW]||L[i+BW]||L[i-BW-1]||L[i-BW+1]||L[i+BW-1]||L[i+BW+1]) todo.push(i);
+    }
+  }
+  for(let k=0;k<todo.length;k++) L[todo[k]]=C.out;
+}
+function comp(L){ for(let i=0;i<L.length;i++){ const v=L[i]; if(v) buf[i]=v; } }
+
+/* ---------- stage layout ---------- */
+const RX=104, RY=121;                 /* fighter root: feet centre */
+const BAGX=146, PIVY=-14;             /* heavy bag pivot (off-screen beam) */
+const BAGT=41, BAGB=83, BAGR=9;
+const HITX=137, HITY=61;              /* contact point on bag surface */
+
+/* ---------- static background ---------- */
+function buildSky(){
+  const bands=[C.sky0,C.sky0,C.sky1,C.sky2,C.sky3,C.sky4,C.sky5,C.sky6], H0=112;
+  for(let y=-MG;y<VH+MG;y++){
+    const v=Math.max(0,Math.min(1,y/(H0-1)))*(bands.length-1);
+    const i=Math.min(bands.length-1,Math.floor(v)), f=v-i;
+    for(let x=-MG;x<VW+MG;x++){
+      const c=(bay(x,y)/16<f && i+1<bands.length)?bands[i+1]:bands[i];
+      set(skyL,x,y,c);
+    }
+  }
+  /* low sun */
+  const sx=198, sy=82, r=14;
+  for(let y=sy-r-6;y<=sy+r+6;y++)for(let x=sx-r-6;x<=sx+r+6;x++){
+    const d=Math.hypot(x+0.5-sx,y+0.5-sy);
+    if(d<=r-4) set(skyL,x,y,C.sun0);
+    else if(d<=r) set(skyL,x,y,C.sun1);
+    else if(d<=r+6 && bay(x,y)/16<(1-(d-r)/6)*0.55) set(skyL,x,y,C.sun1);
+  }
+}
+function ridge(base,amp,freq,ph,col){
+  for(let x=-MG;x<VW+MG;x++){
+    let h=base+Math.sin(x*freq+ph)*amp+Math.sin(x*freq*2.3+ph*1.7)*amp*0.4;
+    h=Math.round(h);
+    for(let y=h;y<112;y++) set(frontL,x,y,col);
+  }
+}
+function pagoda(x,y0,s){
+  let y=y0;
+  const tiers=[[16,4],[13,4],[10,3],[7,3]];
+  for(let i=0;i<tiers.length;i++){
+    const w=Math.round(tiers[i][0]*s), h=Math.round(tiers[i][1]*s);
+    rect(frontL,x-w/2,y-h,w,h,C.ct0);
+    rect(frontL,x-w/2-3,y-h-2,w+6,2,C.ct0);
+    set(frontL,x-w/2-4,y-h-1,C.ct0); set(frontL,x+w/2+3,y-h-1,C.ct0);
+    y-=h+2;
+  }
+  rect(frontL,x-1,y-5,2,5,C.ct0);
+}
+function buildFront(){
+  ridge(86,7,0.035,1.1,C.mt0);
+  ridge(95,5,0.062,4.2,C.mt1);
+  /* distant town */
+  const blocks=[[8,104],[20,101],[30,105],[62,103],[74,100],[86,104],[120,102],[132,105],
+                [160,101],[172,104],[186,103],[214,100],[226,104]];
+  for(const b of blocks){
+    const w=10+((b[0]*7)%9), y=b[1];
+    rect(frontL,b[0]-w/2,y,w,112-y,C.ct0);
+    rect(frontL,b[0]-w/2-2,y-2,w+4,2,C.ct0);
+  }
+  pagoda(42,112,1); pagoda(204,110,0.8);
+  /* parapet / tiled wall behind the floor */
+  rect(frontL,-MG,104,VW+MG*2,8,C.rf1);
+  rect(frontL,-MG,104,VW+MG*2,2,C.rf0);
+  for(let x=-MG;x<VW+MG;x+=6) rect(frontL,x,106,1,6,C.rf2);
+  rect(frontL,-MG,111,VW+MG*2,1,C.rf2);
+  /* wooden floor, planks widening toward camera */
+  let y=112, bh=3, b=0;
+  while(y<VH+MG){
+    rect(frontL,-MG,y,VW+MG*2,bh,C.wd1);
+    rect(frontL,-MG,y,VW+MG*2,1,C.wd0);
+    rect(frontL,-MG,y+bh-1,VW+MG*2,1,C.wd2);
+    const sp=20+b*9, off=(b*13)%sp;
+    for(let x=-MG+off;x<VW+MG;x+=sp) rect(frontL,x,y,1,bh-1,C.wd2);
+    y+=bh; bh+=1+b; b++;
+  }
+  /* wall shadow falling onto the boards */
+  for(let yy=112;yy<116;yy++)for(let x=-MG;x<VW+MG;x++)
+    if(bay(x,yy)/16 < (116-yy)/5) set(frontL,x,yy,C.wd2);
+}
+buildSky(); buildFront();
+
+const CLOUDS=[[20,46,34,4,1.2],[110,38,26,3,2.7],[188,56,30,5,0.4],
+              [60,66,22,3,3.9],[150,72,18,2,2.2],[232,50,24,4,5.1]];
+function drawClouds(L,t){
+  const dt=t*0.030;
+  for(const cl of CLOUDS){
+    const cxp=((cl[0]+dt)%(VW+90))-45, by=cl[1], w=cl[2], h=cl[3], sd=cl[4];
+    for(let x=-w;x<=w;x++){
+      const u=x/w, env=Math.max(0,1-u*u);
+      const hh=h*env*(0.72+0.42*Math.sin(x*0.45+sd*3)+0.3*Math.sin(x*0.17+sd));
+      if(hh<0.6) continue;
+      const px=Math.round(cxp+x), top=Math.round(by-hh), bot=Math.round(by+hh*0.45);
+      for(let y=top;y<=bot;y++){
+        if(y>=bot-1 && bay(px,y)<7) continue;
+        set(L,px,y, y<=top+1?C.cl0 : (y<bot-1?C.cl1:C.cl2));
+      }
+    }
+  }
+}
+
+/* ---------- pose keyframes (offsets from root, y up = negative) ---------- */
+const POS={
+ idle:{hip:[0,-37],chest:[1,-63],head:[4,-74],handN:[14,-56],handF:[6,-67],ankN:[12,-3],ankF:[-12,-3],faF:0},
+ A:   {hip:[-3,-36],chest:[-3,-62],head:[0,-73],handN:[8,-56],handF:[3,-68],ankN:[11,-3],ankF:[-13,-3],faF:4},
+ B:   {hip:[3,-37],chest:[5,-63],head:[7,-73],handN:[21,-59],handF:[0,-66],ankN:[15,-3],ankF:[-14,-5],faF:22},
+ Cc:  {hip:[5,-36],chest:[8,-62],head:[9,-72],handN:[33,-60],handF:[-6,-56],ankN:[18,-3],ankF:[-17,-5],faF:40},
+ Dd:  {hip:[4,-37],chest:[6,-63],head:[8,-73],handN:[29,-60],handF:[-4,-58],ankN:[17,-3],ankF:[-16,-5],faF:34},
+ E:   {hip:[2,-37],chest:[3,-63],head:[6,-74],handN:[19,-58],handF:[2,-64],ankN:[14,-3],ankF:[-13,-4],faF:16},
+ F:   {hip:[0,-37],chest:[1,-63],head:[4,-74],handN:[13,-55],handF:[7,-68],ankN:[12,-3],ankF:[-12,-3],faF:0}
+};
+const SEQ=[{p:'idle',d:56},{p:'A',d:7},{p:'B',d:2},{p:'Cc',d:10,hit:1},
+           {p:'Dd',d:5},{p:'E',d:4},{p:'F',d:5},{p:'idle',d:81}];
+let CYC=0; for(const s of SEQ) CYC+=s.d;
+
+function idlePose(t){
+  const k=Math.floor(t/8)%6, b=Math.sin(k/6*Math.PI*2), s=Math.cos(k/6*Math.PI*2);
+  const P=POS.idle;
+  return {
+    hip:[P.hip[0]+s*0.4, P.hip[1]+b*0.9],
+    chest:[P.chest[0]+s*0.5, P.chest[1]+b*1.3],
+    head:[P.head[0]+s*0.6, P.head[1]+b*1.6],
+    handN:[P.handN[0]+s*0.8, P.handN[1]+b*1.5],
+    handF:[P.handF[0]+s*0.5, P.handF[1]+b*1.2],
+    ankN:P.ankN, ankF:P.ankF, faF:0
+  };
+}
+
+/* ---------- two-bone IK ---------- */
+function ik(ax,ay,bx,by,l1,l2,sg){
+  let dx=bx-ax, dy=by-ay, d=Math.hypot(dx,dy)||1e-4;
+  const ux=dx/d, uy=dy/d;
+  const dc=Math.max(Math.abs(l1-l2)+0.05, Math.min(d, l1+l2-0.05));
+  const ex=ax+ux*dc, ey=ay+uy*dc;
+  const a=(l1*l1-l2*l2+dc*dc)/(2*dc);
+  const h=Math.sqrt(Math.max(0,l1*l1-a*a));
+  return {jx:ax+ux*a-uy*h*sg, jy:ay+uy*a+ux*h*sg, ex:ex, ey:ey};
+}
+const AL1=12, AL2=11, LL1=20, LL2=19;
+
+function buildRig(p){
+  const hip=[RX+p.hip[0], RY+p.hip[1]];
+  const chest=[RX+p.chest[0], RY+p.chest[1]];
+  const head=[RX+p.head[0], RY+p.head[1]];
+  const shN=[chest[0]+4, chest[1]+3], shF=[chest[0]-5, chest[1]];
+  const hN=[RX+p.handN[0], RY+p.handN[1]], hF=[RX+p.handF[0], RY+p.handF[1]];
+  const akN=[RX+p.ankN[0], RY+p.ankN[1]], akF=[RX+p.ankF[0], RY+p.ankF[1]];
+  const reach=Math.hypot(hN[0]-shN[0], hN[1]-shN[1]);
+  return {
+    hip:hip, chest:chest, head:head, shN:shN, shF:shF,
+    hipN:[hip[0]+2,hip[1]], hipF:[hip[0]-2,hip[1]],
+    armN:ik(shN[0],shN[1],hN[0],hN[1],AL1,AL2, reach>20?-1:1),
+    armF:ik(shF[0],shF[1],hF[0],hF[1],AL1,AL2,1),
+    legN:ik(hip[0]+2,hip[1],akN[0],akN[1],LL1,LL2,-1),
+    legF:ik(hip[0]-2,hip[1],akF[0],akF[1],LL1,LL2,-1),
+    faF:p.faF||0
+  };
+}
+
+/* ---------- verlet chains (headband ties, ponytail, sash) ---------- */
+function mkChain(n,seg,r0,r1,cols,damp){return {n:n,seg:seg,r0:r0,r1:r1,cols:cols,damp:damp,pts:[],init:false};}
+const tieA=mkChain(5,5.0,2.2,1.0,RD,0.965);
+const tieB=mkChain(4,4.2,1.8,0.9,RDF,0.960);
+const pony=mkChain(4,4.0,3.0,1.4,HR,0.945);
+const sash=mkChain(6,4.2,2.8,1.2,RDF,0.965);
+function stepChain(ch,ax,ay,wind,grav){
+  const p=ch.pts;
+  if(!ch.init){
+    for(let i=0;i<ch.n;i++) p.push({x:ax-i*ch.seg*0.5, y:ay+i*ch.seg*0.85, px:ax-i*ch.seg*0.5, py:ay+i*ch.seg*0.85});
+    ch.init=true;
+  }
+  p[0].x=ax; p[0].y=ay; p[0].px=ax; p[0].py=ay;
+  for(let i=1;i<ch.n;i++){
+    const q=p[i], vx=(q.x-q.px)*ch.damp, vy=(q.y-q.py)*ch.damp;
+    q.px=q.x; q.py=q.y; q.x+=vx+wind; q.y+=vy+grav;
+  }
+  for(let it=0;it<5;it++)for(let i=0;i<ch.n-1;i++){
+    const a=p[i], b=p[i+1];
+    const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy)||1e-4, f=(d-ch.seg)/d;
+    if(i===0){ b.x-=dx*f; b.y-=dy*f; }
+    else { a.x+=dx*f*0.5; a.y+=dy*f*0.5; b.x-=dx*f*0.5; b.y-=dy*f*0.5; }
+  }
+}
+function drawChain(L,ch){
+  const p=ch.pts; if(!ch.init) return;
+  for(let i=0;i<ch.n-1;i++){
+    const t0=i/(ch.n-1), t1=(i+1)/(ch.n-1);
+    cap(L,p[i].x,p[i].y,p[i+1].x,p[i+1].y,
+        ch.r0+(ch.r1-ch.r0)*t0, ch.r0+(ch.r1-ch.r0)*t1, ch.cols);
+  }
+}
+
+/* ---------- fighter ---------- */
+function foot(L,ax,ay,ang,cols,wcols){
+  const a=ang*Math.PI/180;
+  cap(L,ax,ay,ax+Math.cos(a)*6.5,ay+Math.sin(a)*6.5,2.9,2.4,cols);
+  cap(L,ax-1.4,ay-3.2,ax+1.4,ay-3.0,2.5,2.5,wcols);
+}
+function armEnd(L,arm,cols,wcols,fr){
+  const mx=arm.jx+(arm.ex-arm.jx)*0.45, my=arm.jy+(arm.ey-arm.jy)*0.45;
+  cap(L,mx,my,arm.ex,arm.ey,3.2,3.5,wcols);
+  ell(L,arm.ex,arm.ey,fr,fr*0.96,wcols);
+}
+function drawFighter(L,R){
+  /* cloth behind body */
+  drawChain(L,sash); drawChain(L,tieB); drawChain(L,tieA);
+  /* far leg */
+  cap(L,R.hipF[0],R.hipF[1],R.legF.jx,R.legF.jy,6.2,4.6,PNF);
+  cap(L,R.legF.jx,R.legF.jy,R.legF.ex,R.legF.ey,4.0,2.9,SKF);
+  foot(L,R.legF.ex,R.legF.ey,R.faF,SKF,WRF);
+  /* far arm */
+  ell(L,R.shF[0],R.shF[1],4.4,4.2,SKF);
+  cap(L,R.shF[0],R.shF[1],R.armF.jx,R.armF.jy,4.0,3.2,SKF);
+  cap(L,R.armF.jx,R.armF.jy,R.armF.ex,R.armF.ey,3.2,2.7,SKF);
+  armEnd(L,R.armF,SKF,WRF,3.6);
+  /* torso */
+  cap(L,R.hip[0],R.hip[1],R.chest[0],R.chest[1],6.8,7.8,SK);
+  ell(L,R.shN[0],R.shN[1],4.9,4.7,SK);
+  /* sternum + pec shading */
+  for(let y=Math.round(R.chest[1])+1;y<Math.round(R.hip[1])-7;y++) set(L,R.chest[0]+1,y,C.sk2);
+  cap(L,R.chest[0]-4,R.chest[1]+4,R.chest[0]+5,R.chest[1]+4.4,1.2,1.0,[C.sk2,C.sk2,C.sk2]);
+  /* chest wrap */
+  cap(L,R.shN[0]-1,R.shN[1]+1,R.hip[0]-3,R.hip[1]-6,2.6,2.2,WR);
+  /* trousers + belt */
+  ell(L,R.hip[0],R.hip[1]+1,8,7.4,PN);
+  cap(L,R.hip[0]-7,R.hip[1]-6.5,R.hip[0]+7,R.hip[1]-6,2.3,2.3,GD);
+  /* head */
+  ell(L,R.head[0]-1.5,R.head[1]-0.5,6.6,7.0,HR);
+  ell(L,R.head[0],R.head[1],6.0,6.6,SK);
+  ell(L,R.head[0]-0.5,R.head[1]-4.3,6.2,3.2,HR);
+  cap(L,R.head[0]-4.6,R.head[1]-1,R.head[0]-4.2,R.head[1]+3,1.7,1.5,HR);
+  drawChain(L,pony);
+  cap(L,R.head[0]-6.2,R.head[1]-3.2,R.head[0]+6,R.head[1]-4.2,2.0,1.8,RD);
+  /* face detail */
+  set(L,R.head[0]+2,R.head[1]-1,C.out); set(L,R.head[0]+3,R.head[1]-1,C.out);
+  set(L,R.head[0]+2,R.head[1]-2.6,C.hr2); set(L,R.head[0]+3,R.head[1]-2.6,C.hr2);
+  set(L,R.head[0]+4,R.head[1]+1,C.sk2);
+  set(L,R.head[0]+2,R.head[1]+3,C.sk2);
+  /* near leg */
+  cap(L,R.hipN[0],R.hipN[1],R.legN.jx,R.legN.jy,6.6,4.9,PN);
+  cap(L,R.legN.jx,R.legN.jy,R.legN.ex,R.legN.ey,4.2,3.0,SK);
+  foot(L,R.legN.ex,R.legN.ey,0,SK,WR);
+  /* near arm (the punching arm) */
+  cap(L,R.shN[0],R.shN[1],R.armN.jx,R.armN.jy,4.2,3.4,SK);
+  /* gold armband */
+  {const t0=0.46,t1=0.64;
+   cap(L,R.shN[0]+(R.armN.jx-R.shN[0])*t0, R.shN[1]+(R.armN.jy-R.shN[1])*t0,
+         R.shN[0]+(R.armN.jx-R.shN[0])*t1, R.shN[1]+(R.armN.jy-R.shN[1])*t1, 4.0,3.8,GD);}
+  cap(L,R.armN.jx,R.armN.jy,R.armN.ex,R.armN.ey,3.4,2.9,SK);
+  armEnd(L,R.armN,SK,WR,4.1);
+  /* knuckles */
+  const kd=Math.atan2(R.armN.ey-R.armN.jy,R.armN.ex-R.armN.jx);
+  set(L,R.armN.ex+Math.cos(kd)*2.6,R.armN.ey+Math.sin(kd)*2.6-1,C.wr2);
+  set(L,R.armN.ex+Math.cos(kd)*2.6,R.armN.ey+Math.sin(kd)*2.6+1,C.wr2);
+}
+
+/* ---------- heavy bag ---------- */
+let bagTh=0, bagW=0, bagTh2=0, bagW2=0, dent=0, bagFlash=0;
+function bagAng(){return bagTh+bagTh2;}
+function drawBag(L,flash){
+  const s=Math.sin(bagAng());
+  const yTopC=BAGT+BAGR, yBotC=BAGB-BAGR;
+  for(let y=BAGT;y<=BAGB;y++){
+    let hw;
+    if(y<yTopC){const k=yTopC-y; hw=Math.sqrt(Math.max(0,BAGR*BAGR-k*k));}
+    else if(y>yBotC){const k=y-yBotC; hw=Math.sqrt(Math.max(0,BAGR*BAGR-k*k));}
+    else hw=BAGR;
+    if(hw<0.6) continue;
+    const xc=BAGX+s*(y-PIVY);
+    let left=xc-hw; const right=xc+hw;
+    if(dent>0.05) left+=dent*Math.exp(-((y-HITY)*(y-HITY))/26);
+    const x0=Math.round(left), x1=Math.round(right), span=(x1-x0)||1;
+    for(let x=x0;x<=x1;x++){
+      let c, u=(x-x0)/span;
+      c = u<0.24?C.st0 : u<0.62?C.st1 : C.st2;
+      if(y<BAGT+3||y>BAGB-3) c=(c===C.st0?C.st1:C.st2);
+      if((x*3+y*7)%13===0) c=(c===C.st0?C.st1:C.st2);      /* straw speckle */
+      if(y===BAGT+5||y===BAGT+6||y===BAGB-6||y===BAGB-5) c=(u<0.3?C.st1:C.rp0);
+      if(y<=BAGT+1) c=C.rp0;
+      set(L,x,y, flash?C.fx0:c);
+    }
+  }
+  for(let y=-MG;y<BAGT;y++){
+    const xc=BAGX+s*(y-PIVY);
+    set(L,xc,y,C.rp0); set(L,xc+1,y, (y&1)?C.rp0:C.st2);
+  }
+}
+
+/* ---------- particles / sparks ---------- */
+const parts=[];
+let sparkT=-1, streak=0;
+function spawnHit(){
+  for(let i=0;i<20;i++){
+    const a=(Math.random()*2-1)*1.15, sp=1.0+Math.random()*2.8;
+    parts.push({x:HITX+Math.random()*2, y:HITY+(Math.random()*2-1)*5,
+      vx:Math.cos(a)*sp*0.9+0.5, vy:Math.sin(a)*sp-0.5, g:0.10,
+      l:16+(Math.random()*20|0), c:[C.st0,C.st1,C.fx2,C.fx1][i&3], s:(i%5===0)?2:1});
+  }
+  for(let i=0;i<7;i++){
+    const a=(Math.random()*2-1)*0.9;
+    parts.push({x:HITX-2, y:HITY+(Math.random()*2-1)*7,
+      vx:Math.cos(a)*0.7-0.5, vy:Math.sin(a)*0.7-0.35, g:0.02,
+      l:20+(Math.random()*14|0), c:C.cl1, s:1});
+  }
+}
+function spawnDust(){
+  for(let i=0;i<7;i++){
+    parts.push({x:RX+13+Math.random()*5, y:RY-1, vx:-0.5-Math.random()*0.9,
+      vy:-0.25-Math.random()*0.5, g:0.015, l:18+(Math.random()*12|0),
+      c:(i&1)?C.wd0:C.shd, s:1});
+  }
+}
+function stepParts(){
+  for(let i=parts.length-1;i>=0;i--){
+    const q=parts[i];
+    q.x+=q.vx; q.y+=q.vy; q.vy+=q.g; q.vx*=0.985; q.vy*=0.99;
+    if(--q.l<=0 || q.y>124) parts.splice(i,1);
+  }
+}
+const SPK_R=[7,12,15,16,13,10,7,4], SPK_C=[C.fx0,C.fx0,C.fx1,C.fx1,C.fx2,C.fx2,C.fx3,C.fx3];
+const SPK_K=[5,6,5,4,3,2,1,0];
+function drawSpark(L,a){
+  const rr=SPK_R[a], col=SPK_C[a];
+  for(let k=0;k<8;k++){
+    const ang=k*Math.PI/4+0.22, l=rr*((k&1)?0.6:1);
+    fcap(L,HITX,HITY,HITX+Math.cos(ang)*l,HITY+Math.sin(ang)*l,(a<3?2.4:1.5),0.6,col);
+  }
+  if(SPK_K[a]>0) fdisc(L,HITX,HITY,SPK_K[a], a<2?C.fx0:C.fx1);
+  if(a<6){ const R=5+a*3.2; ring(L,HITX,HITY,R*1.15,R*0.92, a<3?C.fx1:C.fx3); }
+}
+function drawFX(L,R){
+  if(streak){
+    for(let k=-1;k<=1;k++)
+      dash(L,R.shN[0]+3,R.shN[1]+k*3.2,R.armN.ex-3,R.armN.ey+k*2.0,k===0?C.fx0:C.wr1,2);
+  }
+  for(const q of parts){
+    const c=(q.l<5)?C.st2:q.c;
+    if(q.s===2) rect(L,q.x,q.y,2,2,c); else set(L,q.x,q.y,c);
+  }
+  if(sparkT>=0 && sparkT<8) drawSpark(L,sparkT);
+}
+
+/* ---------- shadows ---------- */
+function shadowEll(cx0,cy0,rx,ry){
+  for(let y=Math.floor(cy0-ry);y<=Math.ceil(cy0+ry);y++)
+  for(let x=Math.floor(cx0-rx);x<=Math.ceil(cx0+rx);x++){
+    const nx=(x+0.5-cx0)/rx, ny=(y+0.5-cy0)/ry, q=nx*nx+ny*ny;
+    if(q<=1 && (q<0.45 || ((x+y)&1)===0)) set(buf,x,y,C.shd);
+  }
+}
+
+/* ---------- simulation ---------- */
+const SHK=[[3,-2],[-3,1],[2,1],[-2,-1],[1,1],[-1,0],[1,0]];
+let T=0, POSE=idlePose(0), RIG=buildRig(POSE), hitstop=0, shkT=99, shk=[0,0];
+function seqAt(t){let a=0;for(const s of SEQ){if(t<a+s.d) return {s:s,l:t-a};a+=s.d;}return {s:SEQ[0],l:0};}
+
+function sim(){
+  const tc=T%CYC, at=seqAt(tc);
+  if(tc===0){ if(Math.abs(bagTh)<0.02){bagTh=0;bagW=0;} bagTh2=0; bagW2=0; }
+  POSE = at.s.p==='idle' ? idlePose(T) : POS[at.s.p];
+  RIG = buildRig(POSE);
+
+  if(at.s.hit && at.l===0){
+    bagW+=0.0118; bagW2+=0.055; dent=5.0; sparkT=0;
+    hitstop=4; shkT=0; bagFlash=2; spawnHit();
+  }
+  if(at.s.p==='B' && at.l===0) spawnDust();
+  streak = (at.s.p==='B' || (at.s.p==='Cc' && at.l<2)) ? 1 : 0;
+
+  if(hitstop>0){ hitstop--; }
+  else {
+    bagW += -0.0036*bagTh; bagW*=0.978; bagTh+=bagW;
+    bagW2 += -0.052*bagTh2; bagW2*=0.90;  bagTh2+=bagW2;
+    dent += (0-dent)*0.17;
+    const wind=-0.055+0.045*Math.sin(T*0.045)+0.02*Math.sin(T*0.11);
+    stepChain(tieA, RIG.head[0]-5.6, RIG.head[1]-3.0, wind, 0.17);
+    stepChain(tieB, RIG.head[0]-5.0, RIG.head[1]-1.6, wind*1.15, 0.175);
+    stepChain(pony, RIG.head[0]-5.2, RIG.head[1]-2.2, wind*0.7, 0.16);
+    stepChain(sash, RIG.hip[0]-5.5, RIG.hip[1]-4.0, wind*0.9, 0.19);
+  }
+  stepParts();
+  if(bagFlash>0) bagFlash--;
+  if(sparkT>=0) sparkT++;
+  shkT++;
+  shk = shkT<SHK.length ? SHK[shkT] : [0,0];
+}
+
+/* ---------- render ---------- */
+function render(){
+  buf.set(skyL);
+  drawClouds(buf,T);
+  for(let i=0;i<frontL.length;i++){const v=frontL[i]; if(v) buf[i]=v;}
+  shadowEll(RIG.hip[0]+1,123,17,4.2);
+  shadowEll(BAGX+Math.sin(bagAng())*(62-PIVY)*0.6,124,9,3);
+  spr.fill(0); drawBag(spr,bagFlash>0); outlineL(spr); comp(spr);
+  spr.fill(0); drawFighter(spr,RIG);   outlineL(spr); comp(spr);
+  drawFX(buf,RIG);
+  let o=0; const sx=MG+shk[0], sy=MG+shk[1];
+  for(let y=0;y<VH;y++){
+    let i=(y+sy)*BW+sx;
+    for(let x=0;x<VW;x++){
+      const c=buf[i++]*3;
+      D[o++]=PR[c]; D[o++]=PR[c+1]; D[o++]=PR[c+2]; D[o++]=255;
+    }
+  }
+  lc.putImageData(img,0,0);
+  cx.drawImage(low,0,0,VW,VH,0,0,960,540);
+}
+
+/* ---------- main loop ---------- */
+for(let i=0;i<90;i++){ T++; sim(); }   /* settle cloth before first frame */
+T=0;
+let last=performance.now(), acc=0;
+function frame(now){
+  acc+=Math.min(now-last,100); last=now;
+  while(acc>=1000/60){ acc-=1000/60; T++; sim(); }
+  render();
+  requestAnimationFrame(frame);
+}
+render();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

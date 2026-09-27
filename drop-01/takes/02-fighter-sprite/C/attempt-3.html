@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;width:100%;height:100%;background:#1a1a1e;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+#c{width:960px;height:540px;image-rendering:pixelated;image-rendering:crisp-edges;background:#000}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+(function(){
+const W=240,H=135,SC=4;
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const buf=document.createElement('canvas');buf.width=W;buf.height=H;
+const g=buf.getContext('2d');
+
+const PAL={K:'#1c1424',S:'#f2b48c',s:'#c8804f',d:'#8a4a30',H:'#2c2040',P:'#8646b8',p:'#5c2a86',
+O:'#f28c3a',o:'#b85a22',B:'#3454b4',b:'#203274',R:'#dc3a3a',r:'#8e1e26',Y:'#f4d452',y:'#a88c2a',
+W:'#f6f4ec',w:'#a8a8b4',X:'#ffffff'};
+
+function spr(rows){
+  const h=rows.length;let w=0;for(const r of rows)if(r.length>w)w=r.length;
+  const c=document.createElement('canvas');c.width=w;c.height=h;const q=c.getContext('2d');
+  for(let y=0;y<h;y++)for(let x=0;x<rows[y].length;x++){const ch=rows[y][x];
+    if(ch&&ch!=='.'){q.fillStyle=PAL[ch]||'#f0f';q.fillRect(x,y,1,1);}}
+  return c;
+}
+
+const HEAD_ROWS=[
+".......K....K.........",
+"......KHK..KHK..K.....",
+".....KHHHKKHHHKKHK....",
+".....KHHHHHHHHHHHHK...",
+"....KHHHHHHHHHHHHHHK..",
+"....KPPPPPPPPPPPPPPK..",
+"...KPpPPPPPPPPPPPPPPK.",
+"KPPPpKHHHKSSSSSKKSSK..",
+".KPPpKHHHKSSSSSWKSSK..",
+"..KPpKHHHKsSSSSSSSSK..",
+".KPpKKKHHKsSSSSSSSsSK.",
+"..KpK.KHHKsSSSSSSSSSK.",
+"...KK.KHHKsSSSSKKSSK..",
+".......KHKsSSSSSSSK...",
+"........KKsSSSSSSK....",
+".........KdSSSSKK.....",
+"..........KKKKK......."];
+const HEAD=spr(HEAD_ROWS);
+const HEAD2_ROWS=HEAD_ROWS.slice();
+HEAD2_ROWS[13]=".......KHKsSSSKdKSK...";
+const HEAD2=spr(HEAD2_ROWS);
+
+const TORSO=spr([
+"........KSSSK.........",
+"....KKKKKSSSKKKKK.....",
+"..KKOOOOOKsSKOOOOOKK..",
+".KOOOOOOOOKKKOOOOOOOK.",
+"KoOOOOOOOOOOOOOOOOOOOK",
+"KoOOOOOOOOOOOOOOOOOOOK",
+"KooOOOOOOOOOOOOOOOOOK.",
+".KoOOOOOOOOOOOOOOOOK..",
+".KooOOOOOOOOOOOOOOK...",
+"..KooOOOOOOOOOOOOK....",
+"..KooOOOOOOOOOOOOK....",
+"..KoooOOOOOOOOOOOK....",
+"...KooOOOOOOOOOOK.....",
+"...KoooOOOOOOOOOK.....",
+"...KoooOOOOOOOOOK.....",
+"...KYyYYYYYYYYYYK.....",
+"...KyyYYYYYYYYYYK.....",
+"...KKKKKKKKKKKKKK....."]);
+
+const LEGS_I=spr([
+"....KBBBBBBBBBBBBK........",
+"...KBbBBBBBBBBBBBBK.......",
+"..KBbbBBBBBBBBBBBBBK......",
+".KBbbBBBBBBBKBBBBBBBK.....",
+".KBbbBBBBBBKbKBBBBBBBK....",
+"KBbbBBBBBBKbbbKBBBBBBBK...",
+"KBbbBBBBBKbbbbbKBBBBBBBK..",
+"KBbbBBBBBK.....KBBBBBBBK..",
+"KBbbBBBBK.......KBBBBBBBK.",
+"KBbbBBBBK.......KBbBBBBBBK",
+"KBbbBBBK.........KBbBBBBBK",
+"KbbbBBBK.........KBbBBBBBK",
+"KbbbBBBK.........KBbBBBBBK",
+".KbbBBBK.........KBbBBBBBK",
+".KbbBBBK.........KBbBBBBBK",
+".KbbBBBK.........KBbbBBBBK",
+".KbbBBBK.........KBbbBBBBK",
+".KbbBBBK.........KBbbBBBBK",
+".KKKKKKK.........KBbbBBBBK",
+".KWWWWWKK........KKKKKKKKK",
+"KWwWWWWWWK.......KWWWWWWWK",
+"KwwwwwwwwK......KWwWWWWWWK",
+"KKKKKKKKKK......KwwwwwwwwK",
+"................KKKKKKKKKK"]);
+
+const LEGS_P=spr([
+"......KBBBBBBBBBBBBK............",
+".....KBbBBBBBBBBBBBBK...........",
+"....KBbbBBBBBBBBBBBBBK..........",
+"...KBbbBBBBBBBBKBBBBBBBK........",
+"..KBbbBBBBBBBBKbKBBBBBBBK.......",
+".KBbbBBBBBBBBKbbbKBBBBBBBK......",
+"KBbbBBBBBBBBKbbbbbKBBBBBBBK.....",
+"KBbbBBBBBBBK.......KBBBBBBBK....",
+"KBbbBBBBBBK.........KBBBBBBBK...",
+"KBbbBBBBBK...........KBbBBBBBBK.",
+"KBbbBBBBK.............KBbBBBBBK.",
+"KbbbBBBK...............KBbBBBBBK",
+"KbbbBBBK...............KBbBBBBBK",
+"KbbbBBBK...............KBbBBBBBK",
+"KbbbBBBK...............KBbBBBBBK",
+"KbbbBBBK...............KBbbBBBBK",
+"KbbbBBBK...............KBbbBBBBK",
+"KbbbBBBK...............KBbbBBBBK",
+"KKKKKKKK...............KBbbBBBBK",
+"KWWWWWKK...............KKKKKKKKK",
+"KWwWWWWWK..............KWWWWWWWK",
+"KwwwwwwwwK............KWwWWWWWWK",
+"KKKKKKKKKK............KwwwwwwwwK",
+"......................KKKKKKKKKK"]);
+
+const ARM_F=spr([
+".........KKK.",
+"KKKK....KRRRK",
+"KSSSK...KRrRK",
+"KsSSSK..KRrRK",
+".KsSSSK.KKRRK",
+".KsSSSK.KRrK.",
+"..KsSSSKKSsK.",
+"..KsSSSSSSsK.",
+"...KsSSSSSsK.",
+"...KsSSSSSK..",
+"....KsSSSK...",
+"....KKKKK...."]);
+
+const ARM_R=spr([
+"KKKK............",
+"KsSSK...........",
+"KsSSSK..........",
+".KsSSSK.........",
+".KsSSSKKKKKKKKK.",
+"..KsSSSSSSSKRRRK",
+"..KsSSSSSSSKRrRK",
+"...KsSSSSSSKRrRK",
+"....KKsSSSSKRRK.",
+"......KKKKKKKKK."]);
+
+const ARM_P=spr([
+"...KKKKKKKKKKKKKKKKKK.KKKKKKK...",
+".KKSSSSSSSSSSSSSSSSSKKRRRRRRRK..",
+"KSSSSSSSSSSSSSSRRSSSKRRRRrRRRK..",
+"KsSSSSSSSSSSSSSRRSSSKRRRRrRRRRK.",
+"KsSSSSSSSSSSSSSRRSSSKRRRRRRRRRK.",
+"KssSSSSSSSSSSSSrrSSsKRrrrrrRRRK.",
+".KKsssssssssssssssssKrrrrrrrrK..",
+"...KKKKKKKKKKKKKKKKKKKKKKKKKKK.."]);
+
+const SPARK=[spr([
+"....O....",
+"....Y....",
+".O..X..O.",
+"..Y.X.Y..",
+"OYXXXXXYO",
+"..Y.X.Y..",
+".O..X..O.",
+"....Y....",
+"....O...."]),spr([
+".......O.......",
+".......Y.......",
+".O.....Y.....O.",
+"..Y....X....Y..",
+"...Y...X...Y...",
+"....X..X..X....",
+".....XXXXX.....",
+"OYYXXXX.XXXXYYO",
+".....XXXXX.....",
+"....X..X..X....",
+"...Y...X...Y...",
+"..Y....X....Y..",
+".O.....Y.....O.",
+".......Y.......",
+".......O......."]),spr([
+".........O.........",
+".........Y.........",
+"..O......Y......O..",
+"...Y............Y..",
+"....Y..........Y...",
+"...................",
+"......O......O.....",
+"...................",
+"...................",
+"OYY.............YYO",
+"...................",
+"...................",
+"......O......O.....",
+"...................",
+"....Y..........Y...",
+"...Y............Y..",
+"..O......Y......O..",
+".........Y.........",
+".........O........."])];
+
+const DUST=[spr([
+".WW..",
+"WwwwW",
+".www."]),spr([
+"..W..W..",
+".WwW.wW.",
+"W.ww.wwW",
+"Wwww.wwW",
+".w.w.w.."])];
+
+/* ---------- background (dojo, sunset through the open bay) ---------- */
+const BG=(function(){
+  const c=document.createElement('canvas');c.width=W+8;c.height=H+8;const q=c.getContext('2d');
+  const R=(x,y,w,h,col)=>{q.fillStyle=col;q.fillRect(x+4,y+4,w,h);};
+  let seed=7;const rnd=()=>(seed=(seed*1103515245+12345)&0x7fffffff)/0x7fffffff;
+  R(-4,-4,W+8,H+8,'#2a1a10');
+  // sky bands with dithered transitions
+  const bands=[[10,'#3c3480'],[19,'#6a3f8e'],[28,'#a44a7c'],[38,'#dc6656'],[50,'#f28e46'],[61,'#f8bc5c'],[70,'#fbe28e'],[84,null]];
+  for(let i=0;i<bands.length-1;i++){const y0=bands[i][0],y1=bands[i+1][0];R(66,y0,108,y1-y0,bands[i][1]);
+    if(i>0){for(let y=y0;y<y0+2;y++)for(let x=66;x<174;x++)if((x+y)&1)R(x,y,1,1,bands[i-1][1]);}}
+  // sun
+  const scx=148,scy=64;
+  for(let dy=-13;dy<=13;dy++){const dx=Math.floor(Math.sqrt(169-dy*dy));R(scx-dx,scy+dy,2*dx+1,1,'#ffd66c');}
+  for(let dy=-12;dy<=12;dy++){const dx=Math.floor(Math.sqrt(144-dy*dy));R(scx-dx,scy+dy,2*dx+1,1,'#fff4b8');}
+  // mountains
+  const mtn=(peaks,slope,base,col)=>{for(let x=66;x<174;x++){let top=base;
+    for(const p of peaks){const y=p[1]+Math.abs(x-p[0])*slope;if(y<top)top=y;}
+    top=Math.floor(top);if(top<base)R(x,top,1,base-top,col);}};
+  mtn([[86,54],[122,48],[160,56]],0.45,74,'#5a3e7c');
+  mtn([[100,61],[146,63],[70,66]],0.55,75,'#382650');
+  // lake
+  R(66,75,108,9,'#3a5890');R(66,74,108,1,'#2a2a48');
+  for(let i=0;i<26;i++)R(66+Math.floor(rnd()*104),76+Math.floor(rnd()*7),2+Math.floor(rnd()*3),1,'#7aa0c8');
+  // ceiling beam + top rail
+  R(-4,-4,W+8,14,'#2e1c10');R(-4,9,W+8,1,'#4a2c18');
+  R(-4,10,W+8,5,'#5c3a22');R(-4,10,W+8,1,'#7e5232');R(-4,14,W+8,1,'#3a2414');
+  // shoji panels
+  const shoji=(x0,x1)=>{R(x0,15,x1-x0,69,'#ece3c6');
+    for(let x=x0+8;x<x1-1;x+=9)R(x,15,1,57,'#a89262');
+    for(let y=25;y<72;y+=11)R(x0,y,x1-x0,1,'#a89262');
+    R(x0,72,x1-x0,12,'#7c4c2a');R(x0,72,x1-x0,1,'#9c6640');R(x0,83,x1-x0,1,'#4a2c18');
+    R(x0,15,1,69,'#6a4424');R(x1-1,15,1,69,'#6a4424');};
+  shoji(6,60);shoji(180,234);
+  // posts
+  const post=(x,w)=>{R(x,10,w,80,'#5c3a22');R(x,10,1,80,'#3a2414');R(x+w-2,10,1,80,'#7e5232');R(x+w-1,10,1,80,'#4a2c18');};
+  post(-4,10);post(60,6);post(174,6);post(234,10);
+  // bottom rail
+  R(-4,84,W+8,6,'#5c3a22');R(-4,84,W+8,1,'#7e5232');R(-4,89,W+8,1,'#2e1c10');
+  // floor planks in perspective bands
+  const fb=[90,96,103,111,120,130,143];
+  const fc=['#8a5630','#925c34','#9a6238','#a2683c','#aa6e40','#b27444'];
+  for(let i=0;i<6;i++){const y0=fb[i],y1=fb[i+1];R(-4,y0,W+8,y1-y0,fc[i]);
+    R(-4,y0,W+8,1,'#5e3618');R(-4,y0+1,W+8,1,'#bc8250');
+    let x=-4+Math.floor(rnd()*30);while(x<W+4){R(x,y0+1,1,y1-y0-1,'#6a3e1c');x+=28+Math.floor(rnd()*22);}}
+  R(-4,90,W+8,1,'#2e1c10');R(-4,91,W+8,1,'#5e3618');
+  return c;
+})();
+
+/* ---------- animation timeline ---------- */
+const SEQ=[['idle',90],['wind',7],['ext',2],['hit',12],['ret',5],['rec',7]];
+const TOTAL=SEQ.reduce((a,s)=>a+s[1],0);
+function stateAt(t){let u=t%TOTAL;for(const s of SEQ){if(u<s[1])return [s[0],u];u-=s[1];}return ['idle',0];}
+
+const ORX=84,ORY=53;
+
+function frame(st,lt){
+  const P=[],fx={spark:-1};
+  const add=(s,x,y)=>P.push([s,x,y]);
+  switch(st){
+    case 'idle':{const b=((lt/14)|0)&1;
+      add(LEGS_I,6,41);add(TORSO,7,23+b);add(ARM_R,6,26+b);add(HEAD,5,7+b);add(ARM_F,22,23+b);fx.sh=[19,17];break;}
+    case 'wind':
+      add(LEGS_I,6,41);add(TORSO,7,24);add(ARM_R,3,30);add(HEAD,5,8);add(ARM_F,22,24);fx.sh=[19,17];break;
+    case 'ext':
+      add(LEGS_P,8,41);add(TORSO,11,24);add(ARM_R,14,27);add(HEAD2,9,8);add(ARM_P,28,23);
+      fx.streak=[28,23];fx.dust=[0,26,60];fx.sh=[25,20];break;
+    case 'hit':
+      add(LEGS_P,8,41);add(TORSO,11,24);add(ARM_R,14,27);add(HEAD2,9,8);add(ARM_P,25,23);
+      fx.spark=lt<3?0:lt<7?1:lt<11?2:-1;if(lt<8)fx.dust=[1,25,59-(lt>>2)];fx.sh=[25,20];break;
+    case 'ret':
+      add(LEGS_P,7,41);add(TORSO,10,24);add(ARM_R,13,27);add(HEAD,8,8);add(ARM_P,18,24);fx.sh=[24,19];break;
+    case 'rec':
+      add(LEGS_I,6,41);add(TORSO,8,23);add(ARM_R,8,26);add(HEAD,6,7);add(ARM_F,23,23);fx.sh=[20,17];break;
+  }
+  return [P,fx];
+}
+
+function render(t){
+  const [st,lt]=stateAt(t);
+  let sx=0,sy=0;
+  if(st==='hit'){sx=[2,-2,1,-1,0][lt]||0;sy=[3,-3,2,-1,1,0][lt]||0;}
+  g.clearRect(0,0,W,H);
+  g.drawImage(BG,-4+sx,-4+sy);
+  const [P,fx]=frame(st,lt);
+  const ox=ORX+sx,oy=ORY+sy;
+  if(fx.sh){g.fillStyle='#5c3618';const cx=fx.sh[0],rx=fx.sh[1];
+    for(let dy=-2;dy<=2;dy++){const w=Math.round(rx*Math.sqrt(1-(dy*dy)/6.25));g.fillRect(ox+cx-w,oy+64+dy,2*w+1,1);}}
+  if(fx.dust){const d=DUST[fx.dust[0]];g.drawImage(d,ox+fx.dust[1]-d.width,oy+fx.dust[2]);}
+  for(const p of P)g.drawImage(p[0],ox+p[1],oy+p[2]);
+  if(fx.streak){const ax=fx.streak[0],ay=fx.streak[1];g.fillStyle='#e6f6ff';
+    for(let i=0;i<3;i++){g.fillRect(ox+ax+4+i*6,oy+ay-1,4,1);g.fillRect(ox+ax+7+i*6,oy+ay+8,4,1);}}
+  if(fx.spark>=0){const s=SPARK[fx.spark];g.drawImage(s,ox+57-(s.width>>1),oy+27-(s.height>>1));}
+  if(st==='hit'&&lt===0){g.globalAlpha=0.3;g.fillStyle='#ffffff';g.fillRect(0,0,W,H);g.globalAlpha=1;}
+  ctx.drawImage(buf,0,0,W*SC,H*SC);
+}
+
+let last=performance.now(),acc=0,t=0;
+function loop(now){
+  acc+=Math.min(100,now-last);last=now;
+  while(acc>=1000/60){acc-=1000/60;t++;}
+  render(t);
+  requestAnimationFrame(loop);
+}
+render(0);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

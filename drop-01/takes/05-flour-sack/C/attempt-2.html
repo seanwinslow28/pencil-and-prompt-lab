@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#26242a;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{width:960px;height:540px;background:#f0eadd;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+(function(){
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=960,H=540,GROUND=440,T=24,SC=0.72,PI=Math.PI;
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,k)=>a+(b-a)*k;
+const seg=(t,a,b)=>clamp((t-a)/(b-a),0,1);
+const eIO=k=>k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+const eO=k=>1-Math.pow(1-k,3);
+const eI=k=>k*k*k;
+
+function base(){return {x:480,h:0,sx:1,sy:1,lean:0,bend:0,tilt:0,earL:.55,earR:.55,tremble:0,shake:0};}
+
+/* ---------- EMOTION 1: JOY ---------- */
+function hop(u,hgt,x0,x1,s){
+  const dir=Math.sign(x1-x0)||1;
+  if(u<0.2){
+    const k=eI(u/0.2);
+    s.x=x0; s.sy=1-0.22*k; s.sx=1+0.15*k;
+    s.earL=s.earR=.55+.6*k; s.lean=0.05*dir*k;
+  }else if(u<0.75){
+    const v=(u-0.2)/0.55;
+    s.x=lerp(x0,x1,v); s.h=hgt*4*v*(1-v);
+    const c=Math.abs(Math.cos(PI*v));
+    s.sy=1+0.2*c; s.sx=1-0.12*c;
+    const e=.55+.6*(1-2*v);
+    s.earL=e+0.1; s.earR=e-0.05;
+    s.lean=dir*(0.05+0.1*Math.sin(PI*v));
+    s.tilt=dir*0.12*(v-0.5);
+  }else{
+    const w=(u-0.75)/0.25, sn=Math.sin(PI*w);
+    s.x=x1; s.sy=1-0.3*sn; s.sx=1+0.22*sn;
+    s.earL=s.earR=.55+.9*sn*(1-w*0.3);
+    s.lean=dir*0.05*(1-w);
+  }
+}
+function joy(t,s){
+  const P=0.9,t0=1.1,N=6;
+  const xs=[480,560,640,700,620,540,480];
+  const br=0.012*Math.sin(t*2*PI/2.4);
+  s.sy+=br; s.sx-=br*0.6;
+  s.earL=.55+.06*Math.sin(t*3); s.earR=.55+.06*Math.sin(t*3+1);
+  if(t<t0){
+    const k=seg(t,0.3,0.95);
+    s.tilt=0.07*Math.sin(k*PI)*Math.sin(t*11);
+    s.earL+=0.25*Math.sin(k*PI)*Math.sin(t*11+.5);
+    s.earR+=0.25*Math.sin(k*PI)*Math.sin(t*11+1.2);
+    return;
+  }
+  const tt=t-t0, i=Math.floor(tt/P);
+  if(i<N){ hop((tt-i*P)/P,140,xs[i],xs[i+1],s); return; }
+  const ts=tt-N*P, d=Math.exp(-ts*1.6);
+  s.x=480;
+  s.tilt=0.12*d*Math.sin(ts*14);
+  s.sy+=0.06*d*Math.sin(ts*14+1);
+  s.sx-=0.04*d*Math.sin(ts*14+1);
+  s.earL=.55+0.5*d*Math.sin(ts*14+0.5);
+  s.earR=.55+0.5*d*Math.sin(ts*14+0.5+PI*0.3);
+}
+
+/* ---------- EMOTION 2: SADNESS ---------- */
+const SE={sy:.84,sx:1.12,bend:.45,tilt:.07,earL:2.35,earR:2.7};
+function sad(t,s){
+  const k=eIO(seg(t,0,1.8));
+  s.sy=lerp(1,SE.sy,k); s.sx=lerp(1,SE.sx,k);
+  s.bend=SE.bend*k; s.tilt=SE.tilt*k;
+  s.earL=lerp(.55,SE.earL,eIO(seg(t,0.2,2.2)));
+  s.earR=lerp(.55,SE.earR,eIO(seg(t,0.45,2.5)));
+  const br=Math.sin(t*2*PI/3.4)*0.018*k;
+  s.sy+=br; s.sx-=br*0.5;
+  s.x=480;
+  for(let j=0;j<2;j++){
+    const a=3.0+j*0.8, w=seg(t,a,a+0.55);
+    if(w>0){
+      const sn=Math.sin(PI*w);
+      s.x-=20*eIO(w); s.h+=6*sn; s.sy-=0.03*sn; s.bend+=0.06*sn;
+      s.earL+=0.2*sn; s.earR+=0.15*sn; s.lean-=0.04*sn;
+    }
+  }
+  const r=eIO(seg(t,5.4,6.5)), f=eO(seg(t,6.5,7.0)), g=r*(1-f);
+  s.sy+=0.15*g; s.sx-=0.08*g; s.bend-=0.3*g; s.tilt-=0.05*g;
+  s.earL-=0.7*g; s.earR-=0.5*g;
+  const p=eO(seg(t,6.5,7.6));
+  s.sy-=0.02*p; s.bend+=0.06*p;
+}
+const SADEND=(()=>{const s=base();sad(7.999,s);return s;})();
+
+/* ---------- EMOTION 3: ANGER ---------- */
+function anger(t,s){
+  const S=SADEND;
+  if(t<0.35){
+    const k=eO(t/0.35);
+    s.x=S.x; s.sy=lerp(S.sy,1.14,k); s.sx=lerp(S.sx,.94,k);
+    s.bend=lerp(S.bend,-.12,k); s.tilt=lerp(S.tilt,-.06,k);
+    s.earL=lerp(S.earL,.15,k); s.earR=lerp(S.earR,.15,k);
+    s.lean=lerp(S.lean,0,k); s.tremble=k; return;
+  }
+  if(t<0.9){
+    const k=eIO(seg(t,0.35,0.9));
+    s.x=S.x; s.sy=lerp(1.14,.9,k); s.sx=lerp(.94,1.12,k);
+    s.bend=lerp(-.12,0,k); s.tilt=lerp(-.06,.04,k);
+    s.earL=s.earR=.15; s.lean=.08*k; s.tremble=1; return;
+  }
+  const P=0.54,ts=0.9,N=5;
+  if(t<ts+N*P){
+    const tt=t-ts,i=Math.floor(tt/P),u=(tt-i*P)/P;
+    const x0=S.x+i*32,x1=x0+32;
+    s.earL=s.earR=.15; s.tremble=0.6; s.lean=.08; s.tilt=.04;
+    if(u<0.45){
+      const v=u/0.45, sn=Math.sin(PI*v);
+      s.h=48*sn; s.x=lerp(x0,x1,v);
+      s.sy=.9+.25*sn; s.sx=1.12-.15*sn;
+      s.tilt=.04-.06*sn;
+    }else{
+      const w=(u-0.45)/0.55, q=Math.sin(PI*Math.min(1,w*1.6));
+      s.x=x1; s.sy=.9-.35*q; s.sx=1.12+.3*q;
+      s.shake=0.45*Math.exp(-w*7);
+      s.earL=.15+.35*q; s.earR=.15+.35*q;
+    }
+    return;
+  }
+  const X0=S.x+N*32;
+  if(t<5.1){
+    const r=eI(seg(t,3.6,5.1));
+    s.x=X0-25*r; s.tilt=lerp(.04,-.32,r); s.lean=lerp(.08,-.05,r);
+    s.sy=lerp(.9,.72,r); s.sx=lerp(1.12,1.25,r);
+    s.tremble=0.6+1.6*r; s.earL=s.earR=.15-.15*r; s.bend=-.15*r;
+    return;
+  }
+  if(t<5.85){
+    const v=seg(t,5.1,5.85), c=Math.abs(Math.cos(PI*v)), m=Math.min(1,v*6);
+    s.h=200*4*v*(1-v); s.x=lerp(X0-25,480,v);
+    s.tilt=lerp(-.32,.18,eIO(v));
+    s.sy=lerp(.72,1+.35*c,m); s.sx=lerp(1.25,1-.18*c,m);
+    const e=.1+.8*clamp(1-2*v,0,1);
+    s.earL=e; s.earR=e; s.lean=-.15*Math.sin(PI*v); s.tremble=0.3;
+    s.bend=-.15*(1-m);
+    return;
+  }
+  if(t<6.3){
+    const w=seg(t,5.85,6.3), sn=Math.sin(PI*w);
+    s.x=480; s.sy=1-.45*sn; s.sx=1+.4*sn;
+    s.tilt=lerp(.18,0,eO(w)); s.shake=Math.exp(-(t-5.85)*7);
+    s.earL=.1+1.2*sn; s.earR=.1+1.1*sn; s.tremble=0.5;
+    return;
+  }
+  if(t<7.0){
+    const k=eO(seg(t,6.3,6.6));
+    s.x=480; s.sy=lerp(1,.92,k); s.sx=lerp(1,1.22,k);
+    s.earL=s.earR=.1; s.tremble=1.6*(1-.5*seg(t,6.3,7.0));
+    return;
+  }
+  const k=eIO(seg(t,7.0,8.0));
+  s.x=480; s.sy=lerp(.92,1,k); s.sx=lerp(1.22,1,k);
+  s.earL=s.earR=lerp(.1,.55,k); s.tremble=.8*(1-k);
+}
+
+/* ---------- DRAWING ---------- */
+const BODY=[[-72,0],[-92,32],[-99,92],[-90,152],[-62,196],[-30,213],[30,213],[62,196],[90,152],[99,92],[92,32],[72,0],[26,-1],[-26,-1]];
+function makeTf(s,t){
+  const jx=s.tremble*2.2*(Math.sin(t*66)+0.6*Math.sin(t*101)), jy=s.tremble*0.8*Math.sin(t*88);
+  const ct=Math.cos(s.tilt),st=Math.sin(s.tilt);
+  return (px,py)=>{
+    const x=px*s.sx,y=py*s.sy;
+    const f=clamp(py/213,0,1.3), b=s.bend*f, cb=Math.cos(b),sb=Math.sin(b);
+    let x2=x*cb+y*sb, y2=-x*sb+y*cb;
+    x2+=y2*s.lean;
+    const x3=x2*ct+y2*st, y3=-x2*st+y2*ct;
+    return [s.x+jx+x3*SC, GROUND-s.h+jy-y3*SC];
+  };
+}
+function smoothPath(P){
+  const n=P.length;
+  ctx.beginPath(); ctx.moveTo(P[0][0],P[0][1]);
+  for(let i=0;i<n;i++){
+    const p0=P[(i-1+n)%n],p1=P[i],p2=P[(i+1)%n],p3=P[(i+2)%n];
+    ctx.bezierCurveTo(p1[0]+(p2[0]-p0[0])/6,p1[1]+(p2[1]-p0[1])/6,p2[0]-(p3[0]-p1[0])/6,p2[1]-(p3[1]-p1[1])/6,p2[0],p2[1]);
+  }
+  ctx.closePath();
+}
+function ear(tf,side,ang){
+  const L=66,bx=side*17,by=218;
+  const dx=side*Math.sin(ang),dy=Math.cos(ang);
+  const px=side*Math.cos(ang),py=-Math.sin(ang);
+  const b1=tf(bx-px*13,by-py*13), b2=tf(bx+px*13,by+py*13);
+  const tip=tf(bx+dx*L,by+dy*L);
+  const c1=tf(bx+dx*L*.5-px*9,by+dy*L*.5-py*9);
+  const c2=tf(bx+dx*L*.55+px*24,by+dy*L*.55+py*24);
+  ctx.beginPath(); ctx.moveTo(b1[0],b1[1]);
+  ctx.quadraticCurveTo(c1[0],c1[1],tip[0],tip[1]);
+  ctx.quadraticCurveTo(c2[0],c2[1],b2[0],b2[1]);
+  ctx.closePath();
+  ctx.fillStyle='#d5bb8b'; ctx.fill();
+  ctx.strokeStyle='#5a4630'; ctx.lineWidth=3; ctx.lineJoin='round'; ctx.stroke();
+  const m1=tf(bx+dx*8+px*2,by+dy*8+py*2), m2=tf(bx+dx*L*.62-px*2,by+dy*L*.62-py*2);
+  ctx.beginPath(); ctx.moveTo(m1[0],m1[1]); ctx.lineTo(m2[0],m2[1]);
+  ctx.strokeStyle='rgba(90,70,48,0.35)'; ctx.lineWidth=2; ctx.stroke();
+}
+function draw(t){
+  const s=base();
+  if(t<8)joy(t,s);else if(t<16)sad(t-8,s);else anger(t-16,s);
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,W,H);
+  const shx=s.shake*(7*Math.sin(t*97)+4*Math.sin(t*151)), shy=s.shake*(5*Math.cos(t*113)+3*Math.sin(t*173));
+  ctx.translate(shx,shy);
+  let g=ctx.createLinearGradient(0,-30,0,H+30); g.addColorStop(0,'#f5f0e5'); g.addColorStop(1,'#e8dfcc');
+  ctx.fillStyle=g; ctx.fillRect(-30,-30,W+60,H+60);
+  g=ctx.createLinearGradient(0,GROUND,0,H+30); g.addColorStop(0,'#cfc1a6'); g.addColorStop(1,'#b6a688');
+  ctx.fillStyle=g; ctx.fillRect(-30,GROUND,W+60,H-GROUND+60);
+  ctx.fillStyle='rgba(80,60,40,0.18)'; ctx.fillRect(-30,GROUND-1,W+60,2);
+
+  // shadow
+  const hf=clamp(s.h/260,0,1);
+  ctx.beginPath();
+  ctx.ellipse(s.x,GROUND+6,80*s.sx*(1-0.35*hf),13*(1-0.3*hf),0,0,PI*2);
+  ctx.fillStyle='rgba(60,40,20,'+(0.28*(1-0.6*hf))+')'; ctx.fill();
+
+  const tf=makeTf(s,t);
+  const aL=s.earL+s.tremble*0.05*Math.sin(t*95), aR=s.earR+s.tremble*0.05*Math.sin(t*95+2);
+  ear(tf,-1,aL); ear(tf,1,aR);
+
+  // body
+  const P=BODY.map(p=>tf(p[0],p[1]));
+  smoothPath(P);
+  g=ctx.createLinearGradient(s.x-80,GROUND-s.h-170,s.x+80,GROUND-s.h);
+  g.addColorStop(0,'#ecd9b0'); g.addColorStop(0.55,'#d3b783'); g.addColorStop(1,'#ae8f5c');
+  ctx.fillStyle=g; ctx.fill();
+  ctx.strokeStyle='#5a4630'; ctx.lineWidth=3.5; ctx.lineJoin='round'; ctx.stroke();
+
+  // folds
+  ctx.strokeStyle='rgba(90,70,48,0.35)'; ctx.lineWidth=2; ctx.lineCap='round';
+  const folds=[[[-60,28],[-38,46],[-14,38]],[[14,38],[38,48],[60,28]],[[-50,168],[-32,182],[-10,178]],[[8,180],[30,184],[48,170]]];
+  for(const f of folds){
+    const a=tf(f[0][0],f[0][1]),b=tf(f[1][0],f[1][1]),c=tf(f[2][0],f[2][1]);
+    ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.quadraticCurveTo(b[0],b[1],c[0],c[1]); ctx.stroke();
+  }
+
+  // tie
+  const TP=[];
+  for(let i=0;i<14;i++){const a=i/14*PI*2; TP.push(tf(Math.cos(a)*37,217+Math.sin(a)*9));}
+  smoothPath(TP);
+  ctx.fillStyle='#8b5a2b'; ctx.fill();
+  ctx.strokeStyle='#4d3018'; ctx.lineWidth=2.5; ctx.stroke();
+  const k1=tf(-6,224),k2=tf(6,224);
+  ctx.beginPath(); ctx.arc((k1[0]+k2[0])/2,(k1[1]+k2[1])/2,5*SC*s.sx+2,0,PI*2);
+  ctx.fillStyle='#6d4320'; ctx.fill(); ctx.strokeStyle='#4d3018'; ctx.lineWidth=2; ctx.stroke();
+}
+
+let start=null;
+function frame(now){
+  if(start===null)start=now;
+  const t=((now-start)/1000)%T;
+  draw(t);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#101014}
+body{display:flex;align-items:center;justify-content:center;overflow:hidden}
+#stage{width:960px;height:540px;flex:0 0 auto;background:#000}
+canvas{width:960px;height:540px;display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c" width="320" height="180"></canvas></div>
+<script>
+(()=>{
+const W=320,H=180,M=4,BW=W+2*M,BH=H+2*M,D=Math.PI/180;
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const img=ctx.createImageData(W,H),o32=new Uint32Array(img.data.buffer);
+
+/* ---------- 15-bit color (SNES BGR555) ---------- */
+function q(h){const n=parseInt(h.slice(1),16);const f=v=>{v=v>>3;return(v<<3)|(v>>2);};return[f(n>>16&255),f(n>>8&255),f(n&255)];}
+function pk(c){return((255<<24)|(c[2]<<16)|(c[1]<<8)|c[0])>>>0;}
+function hsh(a,b){let h=Math.imul(a|0,374761393)^Math.imul(b|0,668265263);h=Math.imul(h^(h>>>13),1274126177);h^=h>>>16;return(h>>>0)/4294967296;}
+
+/* ---------- sprite palettes: fighter(1-15), bag(16-24), fx(32-39) ---------- */
+const SPH={1:'#1a0e1c',2:'#6a3424',3:'#a85c38',4:'#e0976a',5:'#463452',6:'#1a3c50',7:'#2a6e84',8:'#58b2b8',
+9:'#7c1822',10:'#d0382e',11:'#34304a',12:'#5c5676',13:'#a8a2b8',14:'#f2eef4',15:'#e8b83a',
+16:'#1a0e14',17:'#5c1a1a',18:'#9a2c24',19:'#cc5a3a',20:'#6a6474',21:'#b8b2c0',22:'#4a4a58',23:'#9a9aac',24:'#ffffff',
+32:'#ffffff',33:'#fff2a0',34:'#ffc640',35:'#ff7a2a',36:'#d23a2a',37:'#d8b890',38:'#9a7a60',39:'#fff6d8'};
+const SP=new Uint32Array(64);for(const k in SPH)SP[k]=pk(q(SPH[k]));
+
+/* ---------- background palette ---------- */
+const BGH=['#000000','#1a1036','#2a1850','#452063','#6e2a6c','#a33a6a','#d45a58','#f08c4c','#ffbe5c',
+'#fff0b0','#ffd878','#3e1c4c','#7a3462','#28122f','#5e3268','#3a347a','#262a60','#181a42',
+'#ffe08a','#ff9a50','#c85060','#9a8ad0','#262a60','#262a60',
+'#170c1c','#3c2230','#6a3a3a','#ffcc55','#ff7a3a',
+'#1e0e14','#4e2a22','#6a3a2a','#8c5234','#b8743e',
+'#20101a','#4a2a26','#724030','#a0603a',
+'#58306a','#e87a5a','#c0a8e0','#8a7ab0','#3a1a3c','#ffb050'];
+const bgP=new Uint32Array(BGH.length),bgD=new Uint32Array(BGH.length);
+function setBG(i,hex){const c=q(hex);bgP[i]=pk(c);bgD[i]=pk([c[0]*.5|0,c[1]*.45|0,c[2]*.62|0]);}
+BGH.forEach((h,i)=>setBG(i,h));
+const CYC=['#ffe08a','#ff9a50','#c85060'],GLI=['#b4a4e8','#262a60','#262a60'];
+
+const buf=new Uint8Array(W*H),shad=new Uint8Array(W*H),bgBuf=new Uint8Array(BW*BH);
+function P(x,y,c){x=Math.floor(x);y=Math.floor(y);if(x>=0&&x<W&&y>=0&&y<H)buf[y*W+x]=c;}
+function B(x,y,c){x=Math.floor(x)+M;y=Math.floor(y)+M;if(x>=0&&x<BW&&y>=0&&y<BH)bgBuf[y*BW+x]=c;}
+
+/* ---------- shaded capsule rasterizer ---------- */
+const LX=.507,LY=-.862;
+function cap(a,b,r0,r1,mode,col,o){
+ const pad=mode===0?1:0,R0=r0+pad,R1=r1+pad;
+ const x0=Math.floor(Math.min(a[0]-R0,b[0]-R1)),x1=Math.ceil(Math.max(a[0]+R0,b[0]+R1));
+ const y0=Math.floor(Math.min(a[1]-R0,b[1]-R1)),y1=Math.ceil(Math.max(a[1]+R0,b[1]+R1));
+ const dx=b[0]-a[0],dy=b[1]-a[1],L2=dx*dx+dy*dy||1e-4,len=Math.sqrt(L2);
+ for(let y=y0;y<=y1;y++){if(y<0||y>=H)continue;
+  for(let x=x0;x<=x1;x++){if(x<0||x>=W)continue;
+   const cx=x+.5,cy=y+.5;let t=((cx-a[0])*dx+(cy-a[1])*dy)/L2;t=t<0?0:t>1?1:t;
+   const ex=cx-a[0]-dx*t,ey=cy-a[1]-dy*t,r=R0+(R1-R0)*t,d2=ex*ex+ey*ey;
+   if(d2>r*r)continue;
+   const i=y*W+x;
+   if(mode===0||typeof col==='number'){if(mode===2&&((x+y)&1))continue;buf[i]=col;continue;}
+   const nx=ex/r,ny=ey/r,nz=Math.sqrt(Math.max(0,1-nx*nx-ny*ny)),s=nx*LX+ny*LY+.4*nz;
+   let k=s>.55?2:s>-.08?1:0;
+   if(o){
+    if(o.stripe){let al=t*len+((-ex*dy+ey*dx)/len)*.6;al=((al%o.stripe)+o.stripe)%o.stripe;if(al<1&&k>0)k--;}
+    if(o.bands){let hit=0;for(const bd of o.bands){if(Math.abs((t-bd.at)*len)<bd.w){buf[i]=bd.r[k];hit=1;break;}}if(hit)continue;}
+   }
+   buf[i]=col[k];
+  }}
+}
+function grp(ps,oc){oc=oc||1;for(const p of ps)cap(p.a,p.b,p.r0,p.r1,0,oc);for(const p of ps)cap(p.a,p.b,p.r0,p.r1,1,p.c,p.o);}
+
+const SKIN=[2,3,4],SKINF=[2,2,3],VEST=[6,7,8],RED=[9,10,10],PANT=[11,12,13],PANTF=[11,11,12],WRAP=[12,13,14],WRAPF=[12,12,13];
+
+/* ---------- hand-pixeled head ---------- */
+const HEAD=[
+".......oo.......",
+"......ohho......",
+"......oyyo......",
+"....oooooooo....",
+"...ohhoooooooo..",
+"..ohoooooooooo..",
+"..oRRRRRRRRRRRo.",
+"..orrrrrrrrrrro.",
+"..ohossslllllo..",
+"..ohodssssooolo.",
+"..oodddsssswoso.",
+"..oddodssssslllo",
+"...odddssssssso.",
+"...oddsssssooo..",
+"....oddsssssso..",
+".....oodddsoo...",
+".......oooo....."];
+function variant(ov){const g=HEAD.slice();for(const k in ov)g[k]=ov[k];return g;}
+const FACES=[HEAD,
+ variant({9:"..ohodsssooooo..",10:"..oodddssssooso.",13:"...oddssssowwo..",14:"....oddssssro..."}),
+ variant({9:"..ohodsssooooo..",10:"..oodddssssooso."}),
+ variant({10:"..oodddssssooso."})];
+const HM={o:1,d:2,s:3,l:4,h:5,r:9,R:10,w:14,y:15};
+function drawHead(hx,hy,f){const g=FACES[f];for(let r=0;r<17;r++){const row=g[r];for(let c=0;c<16;c++){const ch=row[c];if(ch!=='.')P(hx-7+c,hy-14+r,HM[ch]);}}}
+
+/* ---------- rig ---------- */
+function ik(ax,ay,tx,ty,l1,l2,bend){
+ const dx=tx-ax,dy=ty-ay,d=Math.hypot(dx,dy);
+ const dd=Math.min((l1+l2)*.995,Math.max(Math.abs(l1-l2)+.5,d)),a=Math.atan2(dy,dx);
+ const c=(l1*l1+dd*dd-l2*l2)/(2*l1*dd),al=Math.acos(Math.max(-1,Math.min(1,c))),ja=a+bend*al;
+ return{jx:ax+Math.cos(ja)*l1,jy:ay+Math.sin(ja)*l1,ex:ax+Math.cos(a)*dd,ey:ay+Math.sin(a)*dd};
+}
+function armIK(sh,tg){const k=ik(sh[0],sh[1],tg[0],tg[1],14,14,1);const el=[k.jx,k.jy],h=[k.ex,k.ey];const dx=h[0]-el[0],dy=h[1]-el[1],l=Math.hypot(dx,dy)||1;return{sh,el,h,d:[dx/l,dy/l]};}
+function skel(Pz){
+ const ta=Pz.ta*D,u=[Math.cos(ta),Math.sin(ta)],v=[-u[1],u[0]],pel=[Pz.px,Pz.py];
+ const at=(o,a,b)=>[o[0]+u[0]*a+v[0]*b,o[1]+u[1]*a+v[1]*b];
+ const neck=at(pel,30,0),nSh=at(neck,-4,-2+Pz.nsf),fSh=at(neck,-4,3);
+ return{u,v,pel,neck,nHip:[pel[0]-3,pel[1]+1],fHip:[pel[0]+3,pel[1]-1],
+  head:[Math.round(neck[0]+u[0]*3),Math.round(neck[1]+u[1]*3)],nA:armIK(nSh,Pz.nh),fA:armIK(fSh,Pz.fh)};
+}
+function drawArm(A,far){
+ const S=far?SKINF:SKIN,Wr=far?WRAPF:WRAP,{sh,el,h,d}=A;
+ grp([{a:sh,b:el,r0:5,r1:3.8,c:S,o:{bands:[{at:.6,w:.9,r:[9,15,15]}]}},
+  {a:el,b:h,r0:3.9,r1:3.3,c:Wr,o:{stripe:3}},
+  {a:[h[0]-d[0],h[1]-d[1]],b:[h[0]+d[0]*1.5,h[1]+d[1]*1.5],r0:4.3,r1:4.3,c:Wr}]);
+ const px=-d[1],py=d[0];
+ for(let s=-3;s<=3;s++){const x=Math.floor(h[0]+d[0]*1.2+px*s),y=Math.floor(h[1]+d[1]*1.2+py*s);
+  if(x>=0&&x<W&&y>=0&&y<H){const i=y*W+x;if(buf[i]===14||buf[i]===13)buf[i]=far?12:13;}}
+}
+function drawLeg(hip,f,far){
+ const ax=f[0],ay=f[1],A=f[2]*D,co=Math.cos(A),si=Math.sin(A);
+ const rot=(x,y)=>[ax+x*co-y*si,ay+x*si+y*co];
+ const k=ik(hip[0],hip[1],ax,ay,21,21,-1),kn=[k.jx,k.jy],an=[k.ex,k.ey];
+ const sd=[kn[0]-an[0],kn[1]-an[1]];
+ const wt_=[an[0]+sd[0]*.32,an[1]+sd[1]*.32],pe=[an[0]+sd[0]*.22,an[1]+sd[1]*.22];
+ grp([{a:rot(-2,3),b:rot(6,3.5),r0:2.4,r1:2.1,c:far?SKINF:SKIN},
+  {a:an,b:wt_,r0:3.2,r1:3.4,c:far?WRAPF:WRAP,o:{stripe:2.5}},
+  {a:hip,b:kn,r0:6.5,r1:5.2,c:far?PANTF:PANT},
+  {a:kn,b:pe,r0:5.2,r1:5.8,c:far?PANTF:PANT}]);
+}
+let wq=0,wind=0;
+function tail(base,n,sl,a0,droop,amp,ph,r0,r1){
+ let p=base,a=a0;const ps=[];
+ for(let j=0;j<n;j++){const aa=(a+Math.sin(wq*.11+ph-j*.9)*amp*(.35+j*.35))*D;
+  const qq=[p[0]+Math.cos(aa)*sl,p[1]+Math.sin(aa)*sl];
+  ps.push({a:p,b:qq,r0:r0+(r1-r0)*j/n,r1:r0+(r1-r0)*(j+1)/n,c:RED});p=qq;a+=droop;}
+ grp(ps);
+}
+function drawChar(Pz,sk,face,trail){
+ const{u,v,pel,neck,nHip,fHip,head}=sk;
+ const at=(o,a,b)=>[o[0]+u[0]*a+v[0]*b,o[1]+u[1]*a+v[1]*b];
+ const sb=at(pel,4,-7);
+ tail(sb,3,5,102+wind*28,3,5+wind*9,.6,2.4,1.7);
+ tail([sb[0]+1,sb[1]+1],3,4.5,114+wind*28,4,5+wind*9,2.2,2.1,1.5);
+ const hb=[head[0]-6,head[1]-7];
+ tail(hb,4,4.2,170+wind*14,-9*(1-wind*.6),10+wind*14,0,1.8,1);
+ tail([hb[0],hb[1]+1],3,4,158+wind*16,-10*(1-wind*.6),9+wind*12,1.7,1.6,1);
+ drawArm(sk.fA,true);
+ drawLeg(fHip,Pz.ff,true);
+ grp([{a:nHip,b:fHip,r0:7,r1:7,c:PANT},{a:at(pel,7,0),b:at(neck,-5,0),r0:8,r1:9.5,c:VEST}]);
+ drawLeg(nHip,Pz.nf,false);
+ const vt=at(neck,-4,4.5),vb=at(pel,12,5.5);cap(vt,vb,3.2,.8,0,15);cap(vt,vb,3.2,.8,1,SKIN);
+ grp([{a:at(pel,5,-8.5),b:at(pel,5,8.5),r0:3.2,r1:3.2,c:RED},{a:at(pel,4,7.5),b:at(pel,1.5,9),r0:2.5,r1:2,c:RED}]);
+ grp([{a:neck,b:[head[0],head[1]-1],r0:3.8,r1:3.6,c:SKIN}]);
+ drawHead(head[0],head[1],face);
+ if(trail)cap(trail[0],trail[1],2,3.6,2,14);
+ drawArm(sk.nA,false);
+}
+
+/* ---------- key poses (held cels) ---------- */
+const POSE={
+ idle:{px:118,py:120,ta:-78,nsf:0,fh:[146,92],nh:[136,93],ff:[133,154,0],nf:[102,154,0],face:0,wind:0},
+ antic:{px:114,py:122,ta:-83,nsf:-2,fh:[148,91],nh:[130,97],ff:[133,154,0],nf:[102,154,0],face:2,wind:.1},
+ smear:{px:122,py:121,ta:-72,nsf:3,fh:[146,96],nh:[152,94],ff:[137,153,-6],nf:[103,153,14],face:1,wind:1},
+ hit:{px:126,py:122,ta:-68,nsf:4,fh:[150,94],nh:[174,92],ff:[139,154,0],nf:[101,151,25],face:1,wind:1},
+ rec1:{px:124,py:121,ta:-70,nsf:2,fh:[149,94],nh:[158,94],ff:[139,154,0],nf:[102,152,15],face:2,wind:.7},
+ rec2:{px:121,py:120,ta:-74,nsf:0,fh:[148,93],nh:[146,94],ff:[136,154,0],nf:[102,154,4],face:0,wind:.4},
+ rec3:{px:119,py:121,ta:-77,nsf:0,fh:[146,92],nh:[137,94],ff:[134,154,0],nf:[102,154,0],face:0,wind:.2}};
+const SEQ=[['idle',144],['antic',6],['smear',3],['hit',22],['rec1',8],['rec2',8],['rec3',7]];
+const LOOP=SEQ.reduce((a,s)=>a+s[1],0),HS=10;
+function seqAt(t){for(const s of SEQ){if(t<s[1])return[s[0],t];t-=s[1];}return['idle',0];}
+const IB=[0,0,1,2,2,1];
+function poseFor(name,lt){
+ const b=POSE[name],p=Object.assign({},b,{fh:b.fh.slice(),nh:b.nh.slice()});
+ if(name==='idle'){const f=Math.floor(lt/8)%6,g=(f+5)%6;p.py+=IB[f];p.fh[1]+=IB[g];p.nh[1]+=IB[g];p.ta+=IB[f]*.4;if(lt>=100&&lt<105)p.face=3;}
+ return p;
+}
+
+/* ---------- heavy bag placed where the cross lands ---------- */
+const hitSk=skel(POSE.hit);
+const FX=hitSk.nA.h[0]+hitSk.nA.d[0]*5.2,FY=hitSk.nA.h[1]+hitSk.nA.d[1]*5.2;
+const PIVY=35,CHAIN=27,BL=56,BR=11,PIVX=FX+BR-1.2,DY=FY-(PIVY+CHAIN);
+const bag={th:0,w:0,jit:0},K=.0045,C=.05;
+function inBag(lx,ly,g,dent){
+ const R=BR+g,L=BL+g,cr=5+g;if(ly<-g||ly>L)return false;let lim=R;
+ if(ly<-g+cr){const e=(-g+cr)-ly;lim=R-cr+Math.sqrt(Math.max(0,cr*cr-e*e));}
+ else if(ly>L-cr){const e=ly-(L-cr);lim=R-cr+Math.sqrt(Math.max(0,cr*cr-e*e));}
+ let lf=-lim;if(dent)lf+=dent*Math.exp(-(((ly-DY)/5.5)**2));return lx>=lf&&lx<=lim;
+}
+function drawBag(dent,flash){
+ const th=bag.th,ax=Math.sin(th),ay=Math.cos(th),lxv=ay,lyv=-ax;
+ const pvx=PIVX+bag.jit,pvy=PIVY,tx=pvx+ax*CHAIN,ty=pvy+ay*CHAIN;
+ const rg=[pvx+ax*(CHAIN-8),pvy+ay*(CHAIN-8)];
+ const cs=[-1,0,1].map(s=>[tx+lxv*s*(BR-3),ty+lyv*s*(BR-3)]);
+ for(const c of cs)cap(rg,c,.5,.5,0,16);for(const c of cs)cap(rg,c,.5,.5,1,20);
+ for(let s=0;s<=CHAIN-8;s++){const x=pvx+ax*s,y=pvy+ay*s;if((s>>1)&1)P(x,y,23);else{P(x-1,y,16);P(x,y,22);P(x+1,y,16);}}
+ cap(rg,rg,1.6,1.6,0,16);cap(rg,rg,1.6,1.6,1,[22,23,23]);
+ const ex=tx+ax*BL;
+ const bx0=Math.floor(Math.min(tx,ex)-BR-3),bx1=Math.ceil(Math.max(tx,ex)+BR+3);
+ const by0=Math.floor(ty-4),by1=Math.ceil(ty+ay*BL+BR*Math.abs(ax)+4);
+ for(let y=by0;y<=by1;y++)for(let x=bx0;x<=bx1;x++){
+  const rx=x+.5-tx,ry=y+.5-ty,ly=rx*ax+ry*ay,lx=rx*lxv+ry*lyv;
+  if(!inBag(lx,ly,1,dent))continue;
+  if(!inBag(lx,ly,0,dent)){P(x,y,16);continue;}
+  if(flash){P(x,y,24);continue;}
+  const n=Math.max(-1,Math.min(1,lx/BR)),s=n*.62+.45*Math.sqrt(1-n*n)+(ly<2.5?.3:0);
+  const k=s>.62?2:s>.05?1:0;let c;
+  if((ly>=9&&ly<12)||(ly>=BL-12&&ly<BL-9))c=s>.2?21:20;
+  else if((ly>=2.5&&ly<3.5)||(ly>BL-3.5&&ly<=BL-2.5))c=17;
+  else if(Math.abs(lx+BR*.45)<.5&&k===1)c=17;
+  else c=[17,18,19][k];
+  if(dent>.6&&Math.abs(ly-DY)<4&&lx<-BR+dent+2.2)c=17;
+  P(x,y,c);
+ }
+}
+
+/* ---------- background (drawn once) ---------- */
+function drawBG(){
+ const X0=-M,X1=W+M;
+ for(let y=-M;y<96;y++){const t=Math.max(0,(y+4)/100),f=Math.pow(t,1.15)*7.999,i=Math.floor(f),fr=f-i;
+  for(let x=X0;x<X1;x++){let c=1+i;if(i<7){if(fr>.86){if((x+y)&1)c++;}else if(fr>.72){if(!(x&1)&&!(y&1))c++;}}B(x,y,c);}}
+ for(let i=0;i<22;i++){const x=Math.floor(hsh(i,1)*W),y=Math.floor(hsh(i,2)*30);B(x,y,i%3?41:40);}
+ const SX=246,SY=93,SR=21;
+ for(let y=SY-SR-4;y<96;y++)for(let x=SX-SR-4;x<=SX+SR+4;x++){const d=Math.hypot(x+.5-SX,y+.5-SY);
+  if(d<SR-6)B(x,y,9);else if(d<SR)B(x,y,10);else if(d<SR+3&&((x+y)&1))B(x,y,8);}
+ for(const[cx,cy,w]of[[18,40,74],[120,30,96],[180,58,64],[40,62,56],[262,44,56],[130,72,40]]){
+  for(let dx=0;dx<w;dx++){const th=Math.max(0,Math.round(3*Math.sin(Math.PI*dx/w)+(hsh(cx,dx>>3)-.5)));
+   for(let dy=0;dy<=th;dy++)B(cx+dx,cy+dy-th,dy===th?39:38);}}
+ const mt=x=>{const env=1-.8*Math.exp(-(((x-246)/42)**2));return Math.round(96-(15+6*Math.sin(x*.045+.5)+4*Math.sin(x*.12+2)+2*Math.sin(x*.31))*env);};
+ for(let x=X0;x<X1;x++){const tp=mt(x);for(let y=tp;y<96;y++)B(x,y,11);B(x,tp,12);if(mt(x+1)>tp){B(x,tp+1,12);}}
+ const il=x=>18*Math.exp(-(((x-48)/34)**2))+5*Math.exp(-(((x-95)/14)**2));
+ for(let x=X0;x<140;x++){const hh=il(x);if(hh<1)continue;for(let y=Math.round(96-hh);y<96;y++)B(x,y,13);}
+ const pg=48,by=78;
+ for(const[a,b,y0,y1]of[[-5,5,by-6,by],[-8,8,by-7,by-7],[-7,7,by-8,by-8],[-4,4,by-13,by-9],[-7,7,by-14,by-14],[-5,5,by-15,by-15],[-3,3,by-19,by-16],[-5,5,by-20,by-20],[0,0,by-25,by-21]])
+  for(let x=pg+a;x<=pg+b;x++)for(let y=y0;y<=y1;y++)B(x,y,13);
+ B(pg-9,by-8,13);B(pg+9,by-8,13);B(pg-8,by-15,13);B(pg+8,by-15,13);
+ B(pg-2,by-4,43);B(pg+2,by-4,43);B(pg,by-11,43);
+ for(let y=96;y<134;y++)for(let x=X0;x<X1;x++){let c;
+  if(y<99)c=14;else if(y<107)c=y===99?((x+y)&1?14:15):15;else if(y<119)c=y===107?((x+y)&1?15:16):16;else c=y===119?((x+y)&1?16:17):17;
+  if(y>100&&hsh(x>>2,y)<.07)c=c===17?16:c===16?15:c;B(x,y,c);}
+ for(let y=96;y<134;y+=2){const hw=22-(y-96)*.35;for(let x=Math.floor(SX-hw);x<=SX+hw;x++){const sg=Math.floor((x+y*3)/3);if(hsh(sg,y)<.55)B(x,y,18+((sg+y)%3+3)%3);}}
+ for(let i=0;i<44;i++){const x=Math.floor(hsh(i,9)*W),y=100+Math.floor(hsh(i,10)*32);if(Math.abs(x-SX)<28)continue;const l=2+(i%2);for(let k=0;k<l;k++)B(x+k,y,21+i%3);}
+ const posts=[30,86,142,198,254,310],rp=[-26].concat(posts,[366]);
+ for(let i=0;i<rp.length-1;i++){const a=rp[i],b=rp[i+1];for(let x=a+4;x<b;x++){const t=(x-a)/(b-a);for(const y0 of[120,127])B(x,y0+Math.round(2.5*Math.sin(Math.PI*t)),26);}}
+ for(const p of posts){for(let y=113;y<134;y++){B(p,y,24);B(p+1,y,24);B(p+2,y,25);B(p+3,y,24);}for(let x=p;x<p+4;x++)B(x,112,25);}
+ for(const p of[86,254]){B(p+1,102,24);B(p+1,103,24);for(let x=p-1;x<=p+4;x++)for(let y=104;y<=111;y++){const e=x===p-1||x===p+4||y===104||y===111;B(x,y,e?24:(y===110?28:27));}}
+ for(let x=X0;x<X1;x++){B(x,134,33);B(x,135,32);B(x,136,29);}
+ for(let y=137;y<H+M;y++){const dp=y-50;for(let x=X0;x<X1;x++){
+  const X=(x+.5-160)*40/dp,pf=X/5,pl=Math.floor(pf),fr=pf-pl,pw=5*dp/40;
+  if(fr*pw<1){B(x,y,29);continue;}
+  const off=hsh(pl,3)*30;if(Math.floor((2400/dp+off)/8)!==Math.floor((2400/(dp-1)+off)/8)){B(x,y,29);continue;}
+  let c=hsh(pl,7)<.5?30:31;const lt=.75*(1-(y-137)/47)+.35*((x-160)/160)+((x+y)&1?.03:-.03);
+  c=Math.min(33,c+(lt>.62?2:lt>.3?1:0));if(hsh(x,y)<.03)c=Math.max(30,c-1);B(x,y,c);}}
+ const px=Math.round(PIVX),post=px+34;
+ for(let x=post-7;x<=post+12;x++)for(let y=146;y<=152;y++){const e=x===post-7||x===post+12||y===146||y===152;B(x,y,e?34:(y===147?37:35));}
+ for(let y=28;y<=146;y++){B(post,y,34);B(post+1,y,35);B(post+2,y,36);B(post+3,y,36);B(post+4,y,37);B(post+5,y,34);}
+ for(let i=0;i<=17;i++){const x=post-1-i,y=52-i;B(x,y-1,34);B(x,y,36);B(x,y+1,35);B(x,y+2,34);}
+ for(let x=px-10;x<=post+9;x++){B(x,28,34);B(x,29,37);B(x,30,36);B(x,31,36);B(x,32,35);B(x,33,34);}
+ for(let y=28;y<=33;y++){B(px-10,y,34);B(post+9,y,34);}
+ for(let x=px-2;x<=px+2;x++){B(x,34,34);B(x,35,34);}
+}
+drawBG();
+
+/* ---------- fx ---------- */
+function spark(x,y,a){
+ const rays=(rin,L1,L2,w,fc,ec,rot)=>{const sg=[];for(let i=0;i<8;i++){const an=(i*45+rot)*D,L=i%2?L2:L1;if(L<=rin)continue;
+   sg.push([[x+Math.cos(an)*rin,y+Math.sin(an)*rin],[x+Math.cos(an)*L,y+Math.sin(an)*L]]);}
+  for(const s of sg)cap(s[0],s[1],w,.3,0,ec);for(const s of sg)cap(s[0],s[1],w,.3,1,fc);};
+ const disc=(r,fc,ec)=>{cap([x,y],[x,y],r,r,0,ec);cap([x,y],[x,y],r,r,1,fc);};
+ const ring=(r,c,dith)=>{for(let yy=Math.floor(y-r-1);yy<=y+r+1;yy++)for(let xx=Math.floor(x-r*.5-1);xx<=x+r*.5+1;xx++){
+   const e=Math.hypot((xx+.5-x)/.5,yy+.5-y);if(Math.abs(e-r)<.8&&!(dith&&((xx+yy)&1)))P(xx,yy,c);}};
+ if(a<=2){rays(0,a?20:15,a?12:9,2.8,32,34,0);disc(a?7:6,32,33);}
+ else if(a<=5){const k=a-3;ring(8+k*3,33,0);rays(3+k*2,22+k,14+k,2.3,33,35,22.5);disc(4-k,33,34);}
+ else if(a<=9){const k=a-6;ring(17+k*2,35,1);rays(12+k*3,19+k*3,15+k*2,1.6,34,36,k%2?10:0);}
+ else if(a<=15){const k=a-10;for(let i=0;i<8;i++){if(k>3&&(i&1))continue;const an=(i*45+22.5+k*4)*D,R=20+k*2.2,p=[x+Math.cos(an)*R,y+Math.sin(an)*R];
+  cap(p,p,1.2,1.2,0,36);cap(p,p,1.2,1.2,1,k<3?34:35);}}
+}
+function speedLines(A){const{h,d}=A,px=-d[1],py=d[0];
+ for(const[o,l0,l1]of[[-7,6,20],[-3.5,10,26],[5,8,22],[9,12,19]])
+  cap([h[0]-d[0]*l0+px*o,h[1]-d[1]*l0+py*o],[h[0]-d[0]*l1+px*o,h[1]-d[1]*l1+py*o],.6,.3,1,39);}
+let parts=[];
+function dust(x,y,vx,vy,life){parts.push({x,y,vx,vy,age:0,life});}
+function drawDust(){for(const p of parts){const k=p.age/p.life,r=1.6+k*2.6;
+ for(let yy=Math.floor(p.y-r);yy<=p.y+r;yy++)for(let xx=Math.floor(p.x-r);xx<=p.x+r;xx++){
+  const dx=xx+.5-p.x,dy=yy+.5-p.y;if(dx*dx+dy*dy>r*r)continue;
+  if(k>.5&&((xx+yy)&1))continue;if(k>.8&&(((xx>>1)+(yy>>1))&1))continue;P(xx,yy,dy>r*.2?38:37);}}}
+function ell(cx,cy,rx,ry,solid){for(let y=Math.floor(cy-ry);y<=Math.ceil(cy+ry);y++)for(let x=Math.floor(cx-rx);x<=Math.ceil(cx+rx);x++){
+ if(x<0||x>=W||y<0||y>=H)continue;const e=((x+.5-cx)/rx)**2+((y+.5-cy)/ry)**2;if(e>1)continue;if(e>solid&&((x+y)&1))continue;shad[y*W+x]=1;}}
+
+/* ---------- simulation ---------- */
+const SHX=[3,-2,2,-2,1,-1,1,-1,0,0],SHY=[-1,1,0,-1,1,0,0,0,0,0];
+let tick=0,wt=0,shx=0,shy=0,cur={name:'idle',lt:0};
+function update(){
+ const r=seqAt(tick%LOOP),name=r[0],lt=r[1];cur={name,lt};
+ const hs=name==='hit'&&lt<HS;
+ if(hs){shx=SHX[lt];shy=SHY[lt];bag.jit=lt<HS-2?(lt&1?1:-1):0;}
+ else{shx=shy=0;bag.jit=0;wt++;if(wt%5===0)wq=wt;
+  wind+=(POSE[name].wind-wind)*.25;
+  bag.w+=-K*bag.th-C*bag.w;bag.th+=bag.w;
+  for(const p of parts){p.x+=p.vx;p.y+=p.vy;p.vx*=.88;p.vy*=.9;p.age++;}
+  parts=parts.filter(p=>p.age<p.life);}
+ if(name==='smear'&&lt===0){dust(POSE.smear.ff[0]+6,156,.6,-.15,16);dust(POSE.smear.ff[0]-2,156,-.4,-.1,13);}
+ if(name==='hit'&&lt===HS){bag.w+=.024;dust(POSE.hit.nf[0]+5,157,-.7,-.12,14);}
+ if(name==='rec2'&&lt===0)dust(POSE.rec2.ff[0]+4,156,-.3,-.08,11);
+ tick++;
+}
+function render(){
+ const r=Math.floor(wt/7),g=Math.floor(wt/11);
+ for(let i=0;i<3;i++){setBG(18+i,CYC[(i+r)%3]);setBG(21+i,GLI[(i+g)%3]);}
+ setBG(27,hsh(wt>>2,5)<.25?'#ffb040':'#ffcc55');setBG(40,((wt>>5)&1)?'#c0a8e0':'#7a6aa8');
+ buf.fill(0);shad.fill(0);
+ const{name,lt}=cur,Pz=poseFor(name,lt),sk=skel(Pz);
+ ell((Pz.nf[0]+Pz.ff[0])/2+2,158.5,(Pz.ff[0]-Pz.nf[0])/2+10,2.8,.5);
+ ell(PIVX+Math.sin(bag.th)*(CHAIN+BL),158.5,8,1.8,0);
+ let dent=0;if(name==='hit')dent=lt<HS?3.4:3.4*Math.pow(.55,lt-HS+1);
+ drawBag(dent,name==='hit'&&lt<2);
+ if(name==='smear'||(name==='hit'&&lt<5))speedLines(sk.nA);
+ const trail=name==='smear'?[[POSE.idle.nh[0],POSE.idle.nh[1]],sk.nA.h]:null;
+ drawChar(Pz,sk,Pz.face,trail);
+ drawDust();
+ if(name==='hit'&&lt<=15)spark(FX,FY,lt);
+ let o=0;
+ for(let y=0;y<H;y++){const wy=y-shy;for(let x=0;x<W;x++,o++){const wx=x-shx;
+  if(wx>=0&&wx<W&&wy>=0&&wy<H){const i=wy*W+wx,s=buf[i];if(s){o32[o]=SP[s];continue;}
+   const b=bgBuf[(wy+M)*BW+wx+M];o32[o]=shad[i]?bgD[b]:bgP[b];}
+  else o32[o]=bgP[bgBuf[(wy+M)*BW+wx+M]];}}
+ ctx.putImageData(img,0,0);
+}
+update();render();
+let acc=0,last=performance.now();const STEP=1000/60;
+function loop(now){acc+=Math.min(100,now-last);last=now;let n=0;
+ while(acc>=STEP){update();acc-=STEP;n++;}if(n)render();requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

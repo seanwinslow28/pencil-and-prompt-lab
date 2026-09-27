@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;height:100%;background:#0b0b0d;overflow:hidden}
+  body{display:flex;align-items:center;justify-content:center}
+  #c{width:960px;height:540px;display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(function(){
+"use strict";
+
+/* ---------- stage ---------- */
+var cv=document.getElementById('c'),ctx=cv.getContext('2d');
+var W=960,H=540,FLOOR=468,CX=480,H0=238,W0=95,N=32;
+function fit(){var d=Math.min(2,window.devicePixelRatio||1);cv.width=W*d;cv.height=H*d;ctx.setTransform(d,0,0,d,0,0);}
+fit();window.addEventListener('resize',fit);
+
+/* ---------- helpers ---------- */
+function cl(v,a,b){return v<a?a:(v>b?b:v);}
+function sm(x){x=cl(x,0,1);return x*x*(3-2*x);}
+function pulse(t,at,dur){var x=(t-at)/dur;if(x<=0||x>=1)return 0;var s=Math.sin(Math.PI*x);return s*s;}
+function sigh(t,at,dur){var x=(t-at)/dur;if(x<=0||x>=1)return 0;if(x<0.5)return sm(x/0.5);return 1-sm(cl((x-0.5)/0.34,0,1));}
+
+/* ---------- pose containers ---------- */
+function P(o){
+  var d={h:H0,w:W0,lean:0,bend:0,droopL:0.2,droopR:0.2,sag:0.2,rot:0,lift:0,tx:0,belly:0.04};
+  for(var k in o)d[k]=o[k];return d;
+}
+function A(o){
+  var d={h:0,w:0,lean:0,bend:0,droopL:0,droopR:0,sag:0,rot:0,lift:0,tx:0,belly:0};
+  for(var k in o)d[k]=o[k];return d;
+}
+
+/* ---------- EMOTION 1 : PRIDE ----------
+   tall, puffed, corners lifted, slow confident weight-shift, little proud pops */
+function proud(t){
+  var sway=Math.sin(t*2*Math.PI/3.6), sway2=Math.sin(t*2*Math.PI/3.6-0.9);
+  var br=Math.sin(t*2*Math.PI/3.0);
+  var pop=pulse(t,0.9,0.55)+pulse(t,4.4,0.55);
+  return {t:P({
+    h:H0*(1.06+0.022*br+0.050*pop),
+    w:W0*(0.955-0.012*br-0.030*pop),
+    lean:11*sway+4*pop,
+    bend:-8*sway2,
+    droopL:-0.14-0.05*br-0.18*pop,
+    droopR:-0.14-0.05*Math.sin(t*2*Math.PI/3.0+0.7)-0.18*pop,
+    sag:0.05,
+    rot:-2.3*sway,
+    lift:7*pop,
+    tx:9*sway,
+    belly:0.02
+  }),a:A({})};
+}
+
+/* ---------- EMOTION 2 : FEAR ----------
+   gasp-stretch, hard recoil, cower low and away, fine tremble,
+   two flinches, one tentative peek */
+function fear(t){
+  var gasp=pulse(t,0.0,0.50);
+  var drop=pulse(t,0.34,0.70);
+  var cow=sm((t-0.55)/1.10);
+  var fl=pulse(t,2.9,0.40)+pulse(t,4.7,0.40);
+  var peek=pulse(t,6.2,1.15);
+  var breath=Math.sin(t*2*Math.PI/0.55);
+  var tr=(t>0.5?1:0)*(0.70+0.30*Math.sin(t*3.1));
+  return {t:P({
+    h:H0*(0.90+0.30*gasp-0.07*drop-0.05*cow-0.05*fl+0.02*peek),
+    w:W0*(1.04-0.18*gasp+0.07*drop+0.06*cow+0.04*fl),
+    lean:-6-14*cow-13*fl+12*peek,
+    bend:-6-13*cow-9*fl+6*peek,
+    droopL:0.18+0.42*cow+0.22*fl-0.30*peek,
+    droopR:0.18+0.42*cow+0.22*fl-0.30*peek,
+    sag:0.15+0.35*cow,
+    rot:1.0+2.6*cow+2.2*fl-2.4*peek,
+    lift:12*gasp+2.5*fl,
+    tx:-4-11*cow-9*fl+7*peek,
+    belly:0.04+0.08*cow
+  }),a:A({
+    tx:tr*(1.5*Math.sin(t*2*Math.PI*15.5)+0.9*Math.sin(t*2*Math.PI*9.7)),
+    rot:tr*0.70*Math.sin(t*2*Math.PI*17.3),
+    lean:tr*1.6*Math.sin(t*2*Math.PI*13.1),
+    h:tr*H0*(0.010*breath+0.004*Math.sin(t*2*Math.PI*21)),
+    droopL:tr*0.030*Math.sin(t*2*Math.PI*19.0),
+    droopR:tr*0.030*Math.sin(t*2*Math.PI*16.5+1)
+  })};
+}
+
+/* ---------- EMOTION 3 : DEJECTION ----------
+   collapse, folded over to one side, corners hanging,
+   two long sighs, a couple of small hitches */
+function sad(t){
+  var col=sm(t/1.5);
+  var sg=sigh(t,1.9,2.2)+sigh(t,5.4,2.2);
+  var drift=Math.sin(t*2*Math.PI/6.8);
+  var br=Math.sin(t*2*Math.PI/4.2);
+  var sob=pulse(t,4.35,0.22)+pulse(t,4.62,0.22);
+  return {t:P({
+    h:H0*(0.98-0.20*col+0.085*sg+0.008*br),
+    w:W0*(1.00+0.10*col-0.050*sg),
+    lean:15*col-6*sg,
+    bend:23*col-9*sg,
+    droopL:0.95*col+0.05,
+    droopR:0.95*col+0.05,
+    sag:0.20+0.70*col,
+    rot:2.6*col+1.4*drift,
+    lift:0,
+    tx:5*col+6*drift,
+    belly:0.04+0.13*col
+  }),a:A({lift:1.2*sob,h:-H0*0.006*sob})};
+}
+
+/* ---------- link back to pride: gather, then push up ---------- */
+function rise(t){
+  var gather=pulse(t,0.0,1.1);
+  var a=sm((t-0.75)/1.25);
+  var push=pulse(t,0.95,0.85);
+  var set=pulse(t,2.0,1.2);
+  return {t:P({
+    h:H0*(0.78+0.280*a-0.050*gather+0.050*push-0.015*set),
+    w:W0*(1.10-0.145*a+0.040*gather-0.035*push+0.010*set),
+    lean:15-15*a-5*gather+7*push,
+    bend:23-23*a-6*gather+5*push,
+    droopL:1.00-1.14*a-0.15*push,
+    droopR:1.00-1.14*a-0.15*push,
+    sag:0.90-0.85*a,
+    rot:2.6-2.6*a,
+    lift:6*push,
+    tx:5-5*a,
+    belly:0.17-0.15*a
+  }),a:A({})};
+}
+
+/* ---------- timeline (26.2s loop) ---------- */
+var SEG=[{f:proud,d:7.0,b:1.10},{f:fear,d:7.6,b:0.14},{f:sad,d:8.0,b:0.95},{f:rise,d:3.6,b:0.85}];
+var TOT=0;for(var i=0;i<SEG.length;i++)TOT+=SEG[i].d;
+function mix(a,b,u){var o={};for(var k in b)o[k]=a[k]+(b[k]-a[k])*u;return o;}
+function poseAt(time){
+  var tt=((time%TOT)+TOT)%TOT,i=0;
+  while(tt>=SEG[i].d){tt-=SEG[i].d;i++;}
+  var c=SEG[i],p=SEG[(i+SEG.length-1)%SEG.length];
+  var r=c.f(tt);
+  if(tt<c.b){var u=sm(tt/c.b),q=p.f(p.d+tt);r={t:mix(q.t,r.t,u),a:mix(q.a,r.a,u)};}
+  return r;
+}
+
+/* ---------- springs: drag, follow-through, overshoot ---------- */
+var SP={h:[520,36],w:[520,36],lean:[120,14],bend:[95,13],droopL:[58,8.6],droopR:[50,7.9],
+        sag:[75,11],rot:[110,14],lift:[520,38],tx:[140,17],belly:[110,17]};
+var st=null,vl={};
+function initState(tg){st={};for(var k in tg){st[k]=tg[k];vl[k]=0;}}
+function springStep(tg,dt){
+  for(var k in SP){
+    var s=SP[k],acc=(tg[k]-st[k])*s[0]-vl[k]*s[1];
+    vl[k]+=acc*dt;st[k]+=vl[k]*dt;
+  }
+}
+
+/* ---------- sack geometry ---------- */
+var WPK=[[0,0.86],[0.07,0.99],[0.22,1.02],[0.45,1.00],[0.62,0.965],[0.78,0.90],[0.90,0.79],[1,0.62]];
+function wp(t){
+  t=cl(t,0,1);
+  for(var i=0;i<WPK.length-1;i++){
+    var a=WPK[i],b=WPK[i+1];
+    if(t<=b[0]){var u=(b[0]===a[0])?0:(t-a[0])/(b[0]-a[0]);return a[1]+(b[1]-a[1])*sm(u);}
+  }
+  return WPK[WPK.length-1][1];
+}
+function ear(corner,inset,side,droop,s,ux,uy,nx,ny,swing){
+  var th=(55-105*cl(droop,-0.4,1.2))*Math.PI/180;
+  var dx=(nx*side)*Math.cos(th)+ux*Math.sin(th);
+  var dy=(ny*side)*Math.cos(th)+uy*Math.sin(th);
+  var m=Math.hypot(dx,dy)||1;dx/=m;dy/=m;
+  var cs=Math.cos(swing),sn=Math.sin(swing);
+  var rx=dx*cs-dy*sn,ry=dx*sn+dy*cs;
+  var len=s.h*0.185*(1-0.08*Math.max(0,droop));
+  var tip={x:corner.x+rx*len,y:corner.y+ry*len};
+  var c1={x:corner.x+rx*len*0.50+nx*side*len*0.14,y:corner.y+ry*len*0.50+ny*side*len*0.14};
+  var mid={x:(tip.x+inset.x)/2,y:(tip.y+inset.y)/2};
+  var c2={x:mid.x+(corner.x-mid.x)*0.30,y:mid.y+(corner.y-mid.y)*0.30};
+  return {corner:corner,tip:tip,c1:c1,c2:c2};
+}
+function geom(s,swing){
+  function sp(t){var e=t*t*(3-2*t);return {x:s.lean*e+s.bend*Math.sin(Math.PI*t),y:-s.h*t};}
+  var S=[],Lc=[],Rc=[],RAD=[],i,t,p,p1,p2,ux,uy,m,nx,ny,r;
+  for(i=0;i<=N;i++){
+    t=i/N;p=sp(t);p1=sp(Math.max(0,t-0.008));p2=sp(Math.min(1,t+0.008));
+    ux=p2.x-p1.x;uy=p2.y-p1.y;m=Math.hypot(ux,uy)||1;ux/=m;uy/=m;
+    nx=-uy;ny=ux;
+    r=s.w*wp(t)*(1+s.belly*1.8*Math.pow(1-t,1.7));
+    S.push(p);RAD.push(r);
+    Lc.push({x:p.x-nx*r,y:p.y-ny*r});
+    Rc.push({x:p.x+nx*r,y:p.y+ny*r});
+  }
+  var pt=sp(1),pa=sp(0.985);
+  ux=pt.x-pa.x;uy=pt.y-pa.y;m=Math.hypot(ux,uy)||1;ux/=m;uy/=m;
+  nx=-uy;ny=ux;
+  var cL=Lc[N],cR=Rc[N];
+  var tw=Math.hypot(cR.x-cL.x,cR.y-cL.y)||1;
+  var tdx=(cR.x-cL.x)/tw,tdy=(cR.y-cL.y)/tw;
+  var insetL={x:cL.x+tdx*tw*0.26,y:cL.y+tdy*tw*0.26};
+  var insetR={x:cR.x-tdx*tw*0.26,y:cR.y-tdy*tw*0.26};
+  var mx=(insetL.x+insetR.x)/2,my=(insetL.y+insetR.y)/2;
+  var ddx=-ux*0.65,ddy=-uy*0.65+0.35,dm=Math.hypot(ddx,ddy)||1;ddx/=dm;ddy/=dm;
+  var amt=s.sag*0.10*s.h+2;
+  var sagC={x:mx+ddx*amt*2,y:my+ddy*amt*2};
+  var botC={x:(Lc[0].x+Rc[0].x)/2,y:(Lc[0].y+Rc[0].y)/2+4+8*s.belly};
+  return {S:S,Lc:Lc,Rc:Rc,RAD:RAD,insetL:insetL,insetR:insetR,sagC:sagC,botC:botC,
+          ux:ux,uy:uy,
+          eL:ear(cL,insetL,-1,s.droopL,s,ux,uy,nx,ny,swing),
+          eR:ear(cR,insetR, 1,s.droopR,s,ux,uy,nx,ny,swing)};
+}
+function trace(g){
+  var i;
+  ctx.beginPath();
+  ctx.moveTo(g.Rc[0].x,g.Rc[0].y);
+  for(i=1;i<=N;i++)ctx.lineTo(g.Rc[i].x,g.Rc[i].y);
+  ctx.quadraticCurveTo(g.eR.c1.x,g.eR.c1.y,g.eR.tip.x,g.eR.tip.y);
+  ctx.quadraticCurveTo(g.eR.c2.x,g.eR.c2.y,g.insetR.x,g.insetR.y);
+  ctx.quadraticCurveTo(g.sagC.x,g.sagC.y,g.insetL.x,g.insetL.y);
+  ctx.quadraticCurveTo(g.eL.c2.x,g.eL.c2.y,g.eL.tip.x,g.eL.tip.y);
+  ctx.quadraticCurveTo(g.eL.c1.x,g.eL.c1.y,g.Lc[N].x,g.Lc[N].y);
+  for(i=N-1;i>=0;i--)ctx.lineTo(g.Lc[i].x,g.Lc[i].y);
+  ctx.quadraticCurveTo(g.botC.x,g.botC.y,g.Rc[0].x,g.Rc[0].y);
+  ctx.closePath();
+}
+
+/* ---------- background (pre-rendered) ---------- */
+var bg=document.createElement('canvas');
+(function(){
+  bg.width=W;bg.height=H;
+  var b=bg.getContext('2d'),g;
+  g=b.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#16161a');g.addColorStop(0.60,'#24242b');
+  g.addColorStop(0.62,'#1b1b21');g.addColorStop(1,'#101014');
+  b.fillStyle=g;b.fillRect(0,0,W,H);
+  g=b.createRadialGradient(CX,300,0,CX,300,440);
+  g.addColorStop(0,'rgba(255,240,214,0.10)');g.addColorStop(1,'rgba(255,240,214,0)');
+  b.fillStyle=g;b.fillRect(0,0,W,H);
+  b.save();b.translate(CX,FLOOR);b.scale(1,0.17);
+  g=b.createRadialGradient(0,0,0,0,0,350);
+  g.addColorStop(0,'rgba(255,236,206,0.14)');g.addColorStop(1,'rgba(255,236,206,0)');
+  b.fillStyle=g;b.beginPath();b.arc(0,0,350,0,6.2832);b.fill();b.restore();
+  g=b.createRadialGradient(CX,268,170,CX,268,630);
+  g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,0.58)');
+  b.fillStyle=g;b.fillRect(0,0,W,H);
+})();
+
+/* ---------- drawing ---------- */
+function drawShadow(s){
+  var sc=1/(1+s.lift*0.010);
+  var rx=s.w*2.05*sc*(1+s.belly*0.8),ry=13.5*sc;
+  ctx.save();ctx.translate(CX+s.tx*0.85,FLOOR+3);ctx.scale(rx,ry);
+  var g=ctx.createRadialGradient(0,0,0,0,0,1);
+  g.addColorStop(0,'rgba(0,0,0,'+(0.46*sc).toFixed(3)+')');
+  g.addColorStop(0.55,'rgba(0,0,0,'+(0.22*sc).toFixed(3)+')');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g;ctx.beginPath();ctx.arc(0,0,1,0,6.2832);ctx.fill();ctx.restore();
+}
+var FOLDS=[[0.13,-1,0.18],[0.29,-1,0.15],[0.20,1,0.14],[0.52,1,0.12],[0.66,-1,0.14],[0.44,-1,0.10]];
+function drawSack(s,swing){
+  var g=geom(s,swing),i,f,a,b2,c,k,e,gr;
+  ctx.save();
+  ctx.translate(CX+s.tx,FLOOR-s.lift);
+  ctx.rotate(s.rot*Math.PI/180);
+
+  trace(g);
+  ctx.save();ctx.clip();
+
+  gr=ctx.createLinearGradient(-s.w*1.4,-s.h*0.05,s.w*1.5,-s.h*0.95);
+  gr.addColorStop(0,'#7c6644');gr.addColorStop(0.35,'#b7a380');
+  gr.addColorStop(0.72,'#dccdab');gr.addColorStop(1,'#efe5c9');
+  ctx.fillStyle=gr;ctx.fillRect(-520,-720,1040,840);
+
+  gr=ctx.createLinearGradient(0,12,0,-s.h*0.55);
+  gr.addColorStop(0,'rgba(58,42,24,0.55)');gr.addColorStop(1,'rgba(58,42,24,0)');
+  ctx.fillStyle=gr;ctx.fillRect(-520,-720,1040,840);
+
+  gr=ctx.createLinearGradient(0,-s.h*1.02,0,-s.h*0.70);
+  gr.addColorStop(0,'rgba(68,50,28,0.34)');gr.addColorStop(1,'rgba(68,50,28,0)');
+  ctx.fillStyle=gr;ctx.fillRect(-520,-720,1040,840);
+
+  gr=ctx.createRadialGradient(s.w*0.30,-s.h*0.62,0,s.w*0.30,-s.h*0.62,s.w*1.15);
+  gr.addColorStop(0,'rgba(255,252,240,0.30)');gr.addColorStop(1,'rgba(255,252,240,0)');
+  ctx.fillStyle=gr;ctx.fillRect(-520,-720,1040,840);
+
+  ctx.lineCap='round';
+  for(i=0;i<FOLDS.length;i++){
+    f=FOLDS[i];
+    var ia=Math.round(f[0]*N),ib=Math.round(Math.min(0.96,f[0]+f[2])*N);
+    a=(f[1]<0)?g.Lc[ia]:g.Rc[ia];
+    b2={x:g.S[ib].x+f[1]*g.RAD[ib]*0.20,y:g.S[ib].y};
+    c={x:(a.x+b2.x)/2-f[1]*g.RAD[ia]*0.18,y:(a.y+b2.y)/2-4};
+    ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.quadraticCurveTo(c.x,c.y,b2.x,b2.y);
+    ctx.strokeStyle='rgba(88,66,38,0.16)';ctx.lineWidth=2.4;ctx.stroke();
+  }
+  k=Math.round(0.87*N);
+  ctx.beginPath();ctx.moveTo(g.Lc[k].x,g.Lc[k].y);
+  ctx.quadraticCurveTo(g.S[k].x,g.S[k].y+8,g.Rc[k].x,g.Rc[k].y);
+  ctx.strokeStyle='rgba(78,58,32,0.22)';ctx.lineWidth=2.6;ctx.stroke();
+
+  for(i=0;i<2;i++){
+    e=i?g.eR:g.eL;
+    var ins=i?g.insetR:g.insetL;
+    ctx.beginPath();ctx.moveTo(e.corner.x,e.corner.y);
+    ctx.lineTo(e.tip.x,e.tip.y);ctx.lineTo(ins.x,ins.y);ctx.closePath();
+    ctx.fillStyle='rgba(60,44,24,0.09)';ctx.fill();
+  }
+
+  var ox=-g.ux*7,oy=-g.uy*7;
+  ctx.beginPath();
+  ctx.moveTo(g.insetL.x+ox,g.insetL.y+oy);
+  ctx.quadraticCurveTo(g.sagC.x+ox,g.sagC.y+oy,g.insetR.x+ox,g.insetR.y+oy);
+  ctx.setLineDash([5,7]);ctx.lineWidth=2;
+  ctx.strokeStyle='rgba(84,62,36,0.30)';ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.restore();
+
+  trace(g);
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(72,56,34,0.85)';ctx.stroke();
+  ctx.restore();
+}
+
+/* ---------- loop ---------- */
+var last=null,t0=null;
+function frame(now){
+  if(t0===null){t0=now;last=now;}
+  var dt=(now-last)/1000;last=now;if(dt>0.1)dt=0.1;if(dt<0)dt=0;
+  var time=(now-t0)/1000;
+  var p=poseAt(time),tg=p.t;
+  if(!st)initState(tg);
+  var rem=dt;
+  while(rem>0){var h=Math.min(1/240,rem);springStep(tg,h);rem-=h;}
+  var s={},k;
+  for(k in st)s[k]=st[k]+(p.a[k]||0);
+  var swing=cl(-0.0022*(vl.tx+0.5*vl.lean),-0.32,0.32);
+  var lagd=cl(0.0006*vl.lift,-0.10,0.10);
+  s.droopL+=lagd;s.droopR+=lagd;
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(bg,0,0);
+  drawShadow(s);
+  drawSack(s,swing);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

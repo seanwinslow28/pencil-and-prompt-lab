@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#5b5955;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{display:block;width:960px;height:540px;box-shadow:0 14px 40px rgba(0,0,0,.55)}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+(function(){
+const W=960,H=540,TAU=Math.PI*2;
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+ctx.lineCap='round';ctx.lineJoin='round';
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rnd=mulberry32(1);
+
+/* ---------- animation paper ---------- */
+const PW=W+12,PH=H+12;
+const paper=document.createElement('canvas');paper.width=PW;paper.height=PH;
+(function(){
+const p=paper.getContext('2d'),r=mulberry32(99);
+p.fillStyle='#f3eee2';p.fillRect(0,0,PW,PH);
+const g=p.createRadialGradient(PW/2,PH/2,120,PW/2,PH/2,760);
+g.addColorStop(0,'rgba(255,253,246,.5)');g.addColorStop(1,'rgba(150,140,120,.32)');
+p.fillStyle=g;p.fillRect(0,0,PW,PH);
+for(let i=0;i<14000;i++){p.fillStyle='rgba('+(100+r()*80|0)+','+(95+r()*60|0)+','+(80+r()*50|0)+','+(0.03+r()*0.09)+')';p.fillRect(r()*PW,r()*PH,1+r()*2,1)}
+for(let i=0;i<40;i++){p.fillStyle='rgba(120,110,95,'+(0.03+r()*0.05)+')';p.beginPath();p.ellipse(r()*PW,r()*PH,10+r()*40,4+r()*14,r()*TAU,0,TAU);p.fill()}
+function rr(x,y,w,h){const rad=h/2;p.beginPath();p.moveTo(x+rad,y);p.lineTo(x+w-rad,y);p.arc(x+w-rad,y+rad,rad,-Math.PI/2,Math.PI/2);p.lineTo(x+rad,y+h);p.arc(x+rad,y+rad,rad,Math.PI/2,Math.PI*1.5);p.closePath();}
+function hole(x,y,w,h){rr(x-w/2,y-h/2,w,h);p.fillStyle='#4d4b47';p.fill();p.strokeStyle='rgba(0,0,0,.4)';p.lineWidth=2.5;p.stroke();p.strokeStyle='rgba(255,255,255,.35)';p.lineWidth=1;rr(x-w/2-1.5,y-h/2-1.5,w+3,h+3);p.stroke();}
+hole(PW/2,34,18,18);hole(PW/2-235,34,36,18);hole(PW/2+235,34,36,18);
+})();
+
+/* ---------- geometry helpers ---------- */
+function rot(a,x,y){const c=Math.cos(a),s=Math.sin(a);return[x*c-y*s,x*s+y*c]}
+function lerp(a,b,t){return a+(b-a)*t}
+function bez(p0,p1,p2,p3,n){n=n||18;const o=[];for(let i=0;i<=n;i++){const t=i/n,u=1-t;o.push([u*u*u*p0[0]+3*u*u*t*p1[0]+3*u*t*t*p2[0]+t*t*t*p3[0],u*u*u*p0[1]+3*u*u*t*p1[1]+3*u*t*t*p2[1]+t*t*t*p3[1]])}return o}
+function qd(p0,p1,p2,n){n=n||14;const o=[];for(let i=0;i<=n;i++){const t=i/n,u=1-t;o.push([u*u*p0[0]+2*u*t*p1[0]+t*t*p2[0],u*u*p0[1]+2*u*t*p1[1]+t*t*p2[1]])}return o}
+function arc(cx,cy,r,a0,a1,n){n=n||30;const o=[];for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n;o.push([cx+r*Math.cos(a),cy+r*Math.sin(a)])}return o}
+function resample(pts,step){const out=[];let acc=0,next=0;out.push(pts[0].slice());
+ for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i];const L=Math.hypot(b[0]-a[0],b[1]-a[1]);
+  while(next<=acc+L){if(next>acc&&L>0){const t=(next-acc)/L;out.push([a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t]);}next+=step;}acc+=L;}
+ out.push(pts[pts.length-1].slice());return out;}
+
+/* ---------- pencil stroke ---------- */
+const INK='#3b3944',INK2='#8e8a95',BLUE='#b3bfd8';
+function pencil(pts,o){o=o||{};const w=o.w||1.7,passes=o.p||2,wob=o.wob==null?1:o.wob,col=o.col||INK,col2=o.col2||INK2;
+ let P=pts;if(P.length<2)return;
+ if(!o.noext){const e=o.ext||3;P=P.slice();const a=P[0],b=P[1];let dx=a[0]-b[0],dy=a[1]-b[1],L=Math.hypot(dx,dy)||1;const k=rnd()*e;P[0]=[a[0]+dx/L*k,a[1]+dy/L*k];const n=P.length,c=P[n-1],d=P[n-2];dx=c[0]-d[0];dy=c[1]-d[1];L=Math.hypot(dx,dy)||1;const k2=rnd()*e;P[n-1]=[c[0]+dx/L*k2,c[1]+dy/L*k2];}
+ const S=resample(P,3);
+ for(let k=passes-1;k>=0;k--){
+  const amp=wob*(0.4+rnd()*0.7)*(k?1.5:1),f1=0.015+rnd()*0.04,f2=0.07+rnd()*0.1,ph1=rnd()*TAU,ph2=rnd()*TAU;
+  const ox=k?(rnd()-.5)*2.6:0,oy=k?(rnd()-.5)*2.6:0;
+  let i0=0,i1=S.length;if(k){i0=Math.floor(rnd()*S.length*0.25);i1=S.length-Math.floor(rnd()*S.length*0.25);}
+  if(i1-i0<2)continue;
+  const Q=[];
+  for(let i=i0;i<i1;i++){const s=S[i],q=S[Math.min(i+1,S.length-1)],r=S[Math.max(i-1,0)];let nx=-(q[1]-r[1]),ny=q[0]-r[0];const nl=Math.hypot(nx,ny)||1;nx/=nl;ny/=nl;const t=i*3;const n=amp*Math.sin(t*f1+ph1)+amp*.4*Math.sin(t*f2+ph2)+(rnd()-.5)*.5;Q.push([s[0]+nx*n+ox,s[1]+ny*n+oy]);}
+  ctx.strokeStyle=k?col2:col;const lw=k?w*.7:w;
+  for(let i=1;i<Q.length;i++){const u=(i-.5)/Q.length;ctx.lineWidth=lw*(0.6+0.4*Math.sin(u*Math.PI))*(0.75+0.5*Math.abs(Math.sin(i*0.9+ph2)));ctx.beginPath();ctx.moveTo(Q[i-1][0],Q[i-1][1]);ctx.lineTo(Q[i][0],Q[i][1]);ctx.stroke();}
+ }
+}
+function tube(A,B,w0,w1,o){const dx=B[0]-A[0],dy=B[1]-A[1],L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
+ const bl=1.5+rnd()*3;
+ const p1=[A[0]+nx*w0/2,A[1]+ny*w0/2],p2=[B[0]+nx*w1/2,B[1]+ny*w1/2];
+ const q1=[A[0]-nx*w0/2,A[1]-ny*w0/2],q2=[B[0]-nx*w1/2,B[1]-ny*w1/2];
+ const m1=[(p1[0]+p2[0])/2+nx*bl,(p1[1]+p2[1])/2+ny*bl],m2=[(q1[0]+q2[0])/2-nx*bl,(q1[1]+q2[1])/2-ny*bl];
+ pencil(qd(p1,m1,p2),o);pencil(qd(q1,m2,q2),o);}
+
+/* ---------- the walk ---------- */
+const N=16,FPS=12;
+const GROUND=462,CX=480,THIGH=80,SHIN=76,HALF=44,FL=34;
+
+function stance(u){const contact=CX+HALF-2*HALF*u;let a,ankle;
+ if(u<0.15){a=-0.38*(1-u/0.15);const r=rot(a,-10,6);ankle=[contact-r[0],GROUND-r[1]];}
+ else if(u<0.7){a=0;ankle=[contact+10,GROUND-6];}
+ else{const v=(u-0.7)/0.3;a=0.85*v*v;const tx=contact+FL+10;const r=rot(a,FL,6);ankle=[tx-r[0],GROUND-r[1]];}
+ return{ankle:ankle,a:a};}
+const S0=stance(1),S1=stance(0);
+function footAt(ph){ph=((ph%1)+1)%1;if(ph<0.6)return stance(ph/0.6);
+ const v=(ph-0.6)/0.4;
+ const ex=1-Math.pow(1-v,2.0);
+ const x=lerp(S0.ankle[0],S1.ankle[0],ex);
+ const y=lerp(S0.ankle[1],S1.ankle[1],v)-54*Math.sin(Math.PI*Math.pow(v,0.85));
+ let a;if(v<0.7)a=0.85+0.3*Math.sin(Math.PI*v/0.7);else{const t=(v-0.7)/0.3,ss=t*t*(3-2*t);a=lerp(0.85,-0.38,ss);}
+ return{ankle:[x,y],a:a};}
+function ik(Hp,A,l1,l2){let dx=A[0]-Hp[0],dy=A[1]-Hp[1],d=Math.hypot(dx,dy);const maxd=l1+l2-1;
+ if(d>maxd){dx*=maxd/d;dy*=maxd/d;d=maxd;A=[Hp[0]+dx,Hp[1]+dy];}
+ const cosA=(l1*l1+d*d-l2*l2)/(2*l1*d);const a=Math.acos(Math.max(-1,Math.min(1,cosA)));
+ const ang=Math.atan2(dy,dx)-a;
+ return{K:[Hp[0]+l1*Math.cos(ang),Hp[1]+l1*Math.sin(ang)],A:A};}
+
+function shoe(A,a,o){const L=[[-6,-8],[-12,3],[-10,6],[FL,6],[FL+6,2],[FL+2,-3],[14,-7],[4,-9]];
+ const pts=L.map(q=>{const r=rot(a,q[0],q[1]);return[A[0]+r[0],A[1]+r[1]]});pts.push(pts[0]);
+ pencil(pts,Object.assign({noext:true},o));
+ const sp=[[1,-3],[9,1],[17,-1]].map(q=>{const r=rot(a,q[0],q[1]);return[A[0]+r[0],A[1]+r[1]]});
+ pencil(sp,Object.assign({},o,{p:1,w:1}));
+ const b=rot(a,8,-2);pencil(arc(A[0]+b[0],A[1]+b[1],1.5,0,TAU,10),Object.assign({},o,{p:1,w:1,noext:true}));}
+
+function leg(Hp,ph,far){const f=footAt(ph);const r=ik(Hp,f.ankle,THIGH,SHIN);const K=r.K,A=r.A;
+ const o=far?{col:'#7d7986',col2:'#b3afb8',w:1.3}:{};
+ tube(Hp,K,26,16,o);tube(K,A,16,11,o);
+ pencil(arc(K[0]+2,K[1],7,-1.3,1.3,10),Object.assign({},o,{p:1,w:1}));
+ const dx=A[0]-K[0],dy=A[1]-K[1],L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L;
+ pencil([[A[0]-nx*6-dx/L*4,A[1]-ny*6-dy/L*4],[A[0]+nx*6-dx/L*4,A[1]+ny*6-dy/L*4]],Object.assign({},o,{p:1,w:1}));
+ shoe(A,f.a,o);
+ if(A[1]>GROUND-14){for(let i=0;i<5;i++){pencil([[A[0]-16+i*9,GROUND+5],[A[0]-9+i*9,GROUND+12]],{p:1,w:1,col:'#9c98a4',col2:'#9c98a4',wob:.6});}}
+}
+
+function fieldGuide(){const o={col:BLUE,col2:BLUE,w:1,p:1,wob:.7};
+ pencil([[92,72],[868,72]],o);pencil([[868,72],[868,468]],o);pencil([[868,468],[92,468]],o);pencil([[92,468],[92,72]],o);}
+
+function character(p){
+ const bounce=Math.cos(2*TAU*p);
+ const hy=316+7*bounce,hx=CX+3*Math.sin(2*TAU*p+1);
+ const S=[hx-14+3*Math.cos(2*TAU*p+0.5),hy-92];
+ const jig=4*Math.cos(2*TAU*p-0.9);
+ const N0=[S[0]+8,S[1]-4];
+ const C=[N0[0]+12,N0[1]-36+2*Math.cos(2*TAU*p-1.1)];
+ const th=-0.42+0.05*Math.sin(2*TAU*p-1.1);
+ const hp=(x,y)=>{const r=rot(th,x,y);return[C[0]+r[0],C[1]+r[1]]};
+ const hl=pts=>pts.map(q=>hp(q[0],q[1]));
+ const cons={col:BLUE,col2:BLUE,w:1,p:1,wob:.8,noext:true};
+
+ // construction
+ pencil(arc(C[0],C[1],24,0,TAU),cons);
+ pencil(arc(hx+26,hy-30,46,0,TAU),cons);
+ pencil([[hx-30,hy],[hx+30,hy]],cons);
+ pencil([[S[0]-22,S[1]],[S[0]+30,S[1]]],cons);
+ pencil([[C[0],C[1]],[S[0],S[1]],[hx,hy]],cons);
+
+ // ground
+ pencil([[290,GROUND+1],[670,GROUND+1]],{w:1.2,p:1,wob:1.3,col:'#6b6872',col2:'#6b6872'});
+
+ // far leg & far arm
+ leg([hx-4,hy+4],p+0.5,true);
+ arm(true);
+
+ // coat tails
+ const fl=8*Math.sin(2*TAU*p+0.6),fy=-5*Math.cos(2*TAU*p+0.6);
+ const tip=[hx-76+fl,hy+58+fy];
+ pencil(bez([hx-24,hy+2],[hx-44,hy+12],[hx-62+fl*.6,hy+32],tip));
+ pencil(bez([hx-14,hy+14],[hx-36,hy+26],[hx-52+fl*.6,hy+44],[tip[0]+11,tip[1]+8]));
+ pencil([tip,[tip[0]+11,tip[1]+8]]);
+
+ // near leg
+ leg([hx+6,hy+2],p,false);
+
+ // torso
+ pencil(bez([S[0]-6,S[1]-2],[S[0]-24,S[1]+26],[hx-32,hy-34],[hx-24,hy+2]));
+ const belly=bez([S[0]+22,S[1]+4],[hx+66+jig,hy-76],[hx+80+jig,hy+4],[hx+12,hy+22],20);
+ pencil(belly);
+ pencil(arc(S[0]+2,S[1]+2,16,Math.PI*1.05,Math.PI*1.95,14));
+ pencil(bez([S[0]+16,S[1]+6],[S[0]+30,S[1]+30],[hx+52+jig*.5,hy-50],[hx+50+jig*.6,hy-30]));
+ pencil(qd([hx+50+jig*.6,hy-30],[hx+40,hy-8],[hx+12,hy+22]));
+ [10,12,14].forEach(i=>{const b=belly[i];pencil(arc(b[0]-7,b[1],2.5,0,TAU,10),{p:1,w:1,noext:true});});
+ pencil(qd([hx+12,hy+22],[hx+8,hy+30],[hx+2,hy+38]),{p:1});
+ // watch chain
+ pencil(qd([belly[12][0]-8,belly[12][1]],[hx+40+jig,hy-4+2*bounce],[hx+22,hy+2]),{p:1,w:1});
+
+ // near arm
+ arm(false);
+
+ // neck, collar, cravat
+ pencil([hp(20,32),[S[0]+22,S[1]+2]]);
+ pencil([hp(-12,28),[S[0]-4,S[1]-2]]);
+ pencil([[S[0]+6,S[1]+2],[S[0]+16,S[1]-10],[S[0]+25,S[1]+2]],{p:1});
+ pencil(arc(S[0]+22,S[1]+9,7,Math.PI*0.9,Math.PI*2.3,14),{p:1});
+
+ // head
+ pencil(hl(qd([-4,-25],[14,-22],[21,-8])));
+ pencil(hl(bez([21,-8],[22,2],[40,-2],[47,7])));
+ pencil(hl(qd([47,7],[40,11],[27,11])));
+ pencil(hl(bez([27,11],[30,18],[27,24],[24,29])));
+ pencil(hl(qd([24,29],[14,36],[-2,34])));
+ pencil(hl(qd([-2,34],[-14,30],[-18,22])));
+ pencil(hl(qd([26,19],[22,20],[17,18])),{p:1,w:1.2});
+ pencil(hl(qd([6,-5],[12,-1],[18,-5])),{p:1,w:1.3});
+ pencil(hl(qd([2,-17],[12,-21],[21,-13])),{w:1.8});
+ pencil(hl(arc(11,-4,10,0,TAU,24)),{p:1,w:1.2,noext:true});
+ const sw=3*Math.sin(2*TAU*p+1.4);
+ pencil(hl(bez([7,5],[-2+sw,18],[-8+sw*2,32],[-9+sw*2,46])),{p:1,w:1});
+ pencil(hl(bez([28,14],[16,27],[3,22],[8,12])),{w:2});
+ pencil(hl(bez([28,14],[20,22],[10,18],[9,12])),{p:1,w:1.3});
+ pencil(hl(arc(-16,2,7,Math.PI*0.45,Math.PI*1.55,12)),{p:1});
+ pencil(hl(qd([-24,-16],[-32,-8],[-26,0])),{p:1,w:1.2});
+
+ // hat
+ pencil(hl(qd([-38,-22],[-4,-27],[32,-22])),{w:2});
+ pencil(hl(qd([-26,-22],[-30,-46],[-30,-66])));
+ pencil(hl(qd([18,-22],[20,-46],[22,-66])));
+ pencil(hl(qd([-30,-66],[-4,-70],[22,-66])));
+ pencil(hl(qd([-27,-56],[-3,-59],[19,-56])),{p:1,w:1.2});
+
+ function arm(far){const sh=far?[S[0]-8,S[1]+10]:[S[0]-2,S[1]+8];
+  const E=[hx-52+(far?-4:0)+3*Math.sin(2*TAU*p+2),hy-48+(far?8:0)+3*Math.cos(2*TAU*p+2)];
+  const Hd=[hx-32+(far?-5:0),hy-12+(far?6:0)];
+  const o=far?{col:'#7d7986',col2:'#b3afb8',w:1.3}:{};
+  tube(sh,E,17,12,o);tube(E,Hd,12,9,o);
+  pencil(arc(Hd[0]-2,Hd[1]+3,6.5,0,TAU,16),Object.assign({noext:true},o));
+  if(!far){pencil(qd([Hd[0]-8,Hd[1]+3],[Hd[0]-11,Hd[1]+10],[Hd[0]-3,Hd[1]+9]),{p:1,w:1});
+   pencil(qd([Hd[0]-4,Hd[1]+8],[Hd[0]+1,Hd[1]+12],[Hd[0]+5,Hd[1]+6]),{p:1,w:1});}
+ }
+}
+
+/* ---------- frames ---------- */
+function drawFrame(f){
+ rnd=mulberry32(1234+f*7919);
+ const p=f/N;
+ ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#5b5955';ctx.fillRect(0,0,W,H);
+ const dx=(rnd()-.5)*3,dy=(rnd()-.5)*3,ra=(rnd()-.5)*.006;
+ ctx.translate(W/2+dx,H/2+dy);ctx.rotate(ra);ctx.translate(-W/2,-H/2);
+ ctx.drawImage(paper,-6,-6);
+ fieldGuide();
+ character(p);
+ ctx.setTransform(1,0,0,1,0,0);
+ ctx.fillStyle='rgba(40,30,20,'+(rnd()*0.035)+')';ctx.fillRect(0,0,W,H);
+ const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'rgba(0,0,0,.06)');g.addColorStop(.15,'rgba(0,0,0,0)');g.addColorStop(1,'rgba(0,0,0,.05)');
+ ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+}
+let last=-1;const t0=performance.now();
+function loop(now){const f=Math.floor((now-t0)/1000*FPS)%N;if(f!==last){last=f;drawFrame(f);}requestAnimationFrame(loop);}
+drawFrame(0);requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

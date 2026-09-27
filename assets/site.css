@@ -1,0 +1,124 @@
+/* Pencil & Prompt Lab: one stylesheet for the index and every episode page. */
+:root{
+  --ground:#E9ECEE; --surface:#FFFFFF; --ink:#1B2130; --muted:#5A6272; --rule:#D3D8DE;
+  --stage:#F7F8F9; --pass:#1F4FA3; --pass-ink:#FFFFFF; --fail:#C23B2A; --fail-ink:#FFFFFF;
+  --note-bg:#F6E7C8; --note-ink:#6B4A0E; --focus:#1F4FA3; --accent:#1B2130; --accent-ink:#FFFFFF;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --cond:"IBM Plex Sans Condensed","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  --script:"Courier Prime","Courier New",Courier,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --ground:#12151A; --surface:#1B1F26; --ink:#E4E7EC; --muted:#9AA2AF; --rule:#2E343D;
+  --stage:#0E1014; --pass:#6F9BE8; --pass-ink:#0B1222; --fail:#E4705F; --fail-ink:#1E0B07;
+  --note-bg:#3A2E14; --note-ink:#F2D597; --focus:#7EA6EC; --accent:#E4E7EC; --accent-ink:#12151A;
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#12151A; --surface:#1B1F26; --ink:#E4E7EC; --muted:#9AA2AF; --rule:#2E343D;
+  --stage:#0E1014; --pass:#6F9BE8; --pass-ink:#0B1222; --fail:#E4705F; --fail-ink:#1E0B07;
+  --note-bg:#3A2E14; --note-ink:#F2D597; --focus:#7EA6EC; --accent:#E4E7EC; --accent-ink:#12151A;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ground);color:var(--ink);font:16px/1.55 var(--sans);padding:0 16px 64px}
+a{color:inherit;text-underline-offset:3px}
+a:focus-visible,button:focus-visible,summary:focus-visible,pre:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.wrap{max-width:1320px;margin:0 auto;display:flex;flex-direction:column;gap:28px}
+.masthead{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px;padding:18px 0 14px;border-bottom:1px solid var(--rule)}
+.masthead .site{font:600 15px/1 var(--cond);letter-spacing:.08em;text-transform:uppercase;text-decoration:none}
+.masthead .meta{font:500 13px/1.2 var(--cond);letter-spacing:.05em;color:var(--muted)}
+h1{font:600 clamp(30px,5vw,48px)/1.05 var(--cond);letter-spacing:.01em;margin:0}
+h2{font:600 26px/1.15 var(--cond);margin:0}
+h3{font:600 18px/1.2 var(--cond);margin:0}
+.lede{font-size:18px;max-width:68ch;margin:0}
+.muted{color:var(--muted)}
+.small{font-size:14px}
+.prose{max-width:72ch;display:flex;flex-direction:column;gap:12px}
+.prose p,.prose ul{margin:0}
+.prose li+li{margin-top:6px}
+.bar{margin:0;padding:14px 16px;border:1px solid var(--rule);border-radius:10px;background:var(--surface);max-width:72ch;font-size:18px}
+.bar b{font:600 12px/1 var(--cond);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:6px}
+.btn{font:600 15px/1 var(--cond);letter-spacing:.04em;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:13px 20px;cursor:pointer;align-self:flex-start}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn[disabled]{opacity:.55;cursor:default}
+
+/* Briefs and takes */
+.brief{display:flex;flex-direction:column;gap:14px;padding-top:6px}
+.brief-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px}
+.brief-head p{margin:0;color:var(--muted)}
+.fp{font:12px/1.3 var(--mono);color:var(--muted);overflow-wrap:anywhere}
+.takes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:900px){.takes{grid-template-columns:minmax(0,1fr)}}
+.take{background:var(--surface);border:1px solid var(--rule);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.take-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid var(--rule)}
+.letter{font:600 26px/1 var(--cond)}
+.tools{display:flex;gap:6px;align-items:center}
+.tools a,.tools button{font:500 12px/1 var(--cond);letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--rule);background:transparent;color:var(--ink);border-radius:5px;padding:6px 8px;cursor:pointer;text-decoration:none}
+.stage{position:relative;background:var(--stage);aspect-ratio:1000/600;overflow:hidden}
+.stage iframe{position:absolute;left:0;top:0;width:1000px;height:600px;border:0;transform-origin:0 0;background:#fff}
+pre.txt{margin:0;background:var(--stage);font:12.5px/1.4 var(--script);white-space:pre-wrap;padding:12px;height:360px;overflow:auto;color:var(--ink)}
+.note{margin:0;padding:7px 12px;background:var(--note-bg);color:var(--note-ink);font-size:13px;line-height:1.4}
+.verdict{display:none;flex-direction:column;gap:8px;padding:12px;border-top:1px solid var(--rule)}
+.revealed .verdict{display:flex}
+.vrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.model{font:600 19px/1.1 var(--cond)}
+.chip{font:600 12px/1 var(--cond);letter-spacing:.07em;text-transform:uppercase;padding:6px 8px;border-radius:5px;border:1px solid var(--rule);color:var(--muted);font-variant-numeric:tabular-nums}
+.chip.pass{background:var(--pass);border-color:var(--pass);color:var(--pass-ink)}
+.chip.fail{background:var(--fail);border-color:var(--fail);color:var(--fail-ink)}
+.why{margin:0;font-size:15px}
+.why::before{content:"Judge's note, written blind: ";color:var(--muted)}
+.steady{margin:0;font-size:15px}
+.steady::before{content:"Across three attempts: ";color:var(--muted)}
+details.more{border-top:1px solid var(--rule)}
+details.more summary{cursor:pointer;padding:10px 12px;font:500 13px/1.2 var(--cond);letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.more-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;padding:0 12px 12px}
+.more-grid .take{border-radius:8px}
+.more-grid .letter{font-size:15px}
+.more-grid pre.txt{height:260px}
+.revealonly{display:none}
+.revealed .revealonly{display:flex}
+.revealed .hideonreveal{display:none}
+
+/* Post-reveal sections */
+.panel{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:18px;display:flex;flex-direction:column;gap:12px}
+table.vt{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+.vt th,.vt td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--rule);vertical-align:middle}
+.vt th{font:600 13px/1.2 var(--cond);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.vt td .chip{margin-right:6px}
+.tablewrap{overflow-x:auto}
+pre.excerpt{margin:0;background:var(--stage);border:1px solid var(--rule);border-radius:8px;font:13px/1.45 var(--mono);white-space:pre-wrap;padding:14px;overflow:auto;max-height:520px}
+.footstage{max-width:760px;width:100%}
+table.fps{border-collapse:collapse;width:100%}
+.fps td,.fps th{padding:7px 10px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+.fps th{font:600 12px/1.2 var(--cond);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.fps code{font:12px/1.35 var(--mono);overflow-wrap:anywhere}
+
+/* Index */
+.eplist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.eplist a{display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;text-decoration:none}
+.eplist a:hover{border-color:var(--ink)}
+.eptype{font:600 12px/1 var(--cond);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.eptitle{font:600 22px/1.2 var(--cond)}
+
+/* Record mode: a fixed frame the recorder captures, no page chrome. */
+body.rec{padding:0;overflow:hidden;background:var(--ground)}
+body.rec .wrap{max-width:none;padding:26px 24px 0;gap:18px}
+body.rec .masthead,body.rec .page{display:none}
+.recframe{display:flex;flex-direction:column;gap:16px;min-height:calc(100vh - 26px);justify-content:center;padding-bottom:26px}
+.rechead{display:flex;align-items:baseline;justify-content:space-between;gap:20px}
+.rechead .q{font:600 40px/1.05 var(--cond)}
+.rechead .b{font:500 22px/1.2 var(--cond);color:var(--muted);letter-spacing:.03em}
+.rectakes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.rectake{display:flex;flex-direction:column;gap:10px}
+.rectake .letter{font-size:44px;text-align:center}
+.rectake .stage,.rectake pre.txt{border:1px solid var(--rule);border-radius:8px}
+.rectake pre.txt{height:auto;overflow:hidden;font-size:14px;line-height:1.38}
+.recfoot{font:500 18px/1.2 var(--cond);color:var(--muted);letter-spacing:.03em}
+.recverdicts{padding:10px 0;display:flex;flex-direction:column;gap:18px}
+.recverdicts .vt td,.recverdicts .vt th{padding:16px 18px;font-size:20px}
+.recverdicts .vt th{font-size:17px}
+.recverdicts .chip{font-size:16px;padding:8px 11px}
+.recpage{padding:28px 32px;display:flex;flex-direction:column;gap:14px}
+.recpage pre.txt{height:auto;overflow:visible;font-size:17px;line-height:1.45;border:1px solid var(--rule);border-radius:8px;padding:22px}

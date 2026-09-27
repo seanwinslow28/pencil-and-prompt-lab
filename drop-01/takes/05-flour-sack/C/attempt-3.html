@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#1c1a17;overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+canvas{width:960px;height:540px;display:block;box-shadow:0 0 0 1px #000,0 20px 60px rgba(0,0,0,.6)}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+(function(){
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const W=960,H=540,CX=480,FLOOR=445,T=26;
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const ease=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+const base=()=>({x:0,y:0,sx:1,sy:1,lean:0,ns:0,earL:60,earR:60,belly:22});
+function mix(a,b,t){const o={};for(const k in a)o[k]=lerp(a[k],b[k],t);return o;}
+
+/* ---------- emotion 1: dejection (0-8s) ---------- */
+function sad(t){
+  t=clamp(t,0,8);
+  const p=base();
+  const br=Math.sin(t*1.3);
+  p.sy=0.86+0.015*br;
+  p.lean=0.12+0.02*br;
+  p.ns=-14-1.5*br;
+  p.earL=4+3*Math.sin(t*1.3+0.3);
+  p.earR=2+3*Math.sin(t*1.3+0.9);
+  // dragging shuffle toward centre
+  const n=t/1.6,i=Math.floor(n),f=n-i;
+  const allowed=[1,1,0,1,1];
+  let done=0;for(let k=0;k<i&&k<5;k++)done+=allowed[k];
+  let step=0,lift=0;
+  if(i<5&&allowed[i]){step=ease((f-0.25)/0.45);lift=Math.sin(Math.PI*clamp((f-0.25)/0.45,0,1));}
+  p.x=-260+40*(done+step);
+  p.y=3*lift;p.sy+=0.02*lift;p.lean+=0.04*lift;
+  // heavy sigh
+  const s=(t-3.4)/2.3;let a=0;
+  if(s>0&&s<1){
+    if(s<0.5)a=ease(s/0.5);
+    else if(s<0.68)a=1-1.3*ease((s-0.5)/0.18);
+    else a=-0.3*(1-ease((s-0.68)/0.32));
+  }
+  p.sy+=0.13*a;p.lean-=0.1*a;p.ns+=10*a;p.earL+=32*a;p.earR+=28*a;
+  p.sx=1+(1-p.sy)*0.85;
+  p.belly=22+(1-p.sy)*20-6*a;
+  return p;
+}
+
+/* ---------- emotion 2: joy (8-17s) ---------- */
+function joy(u){
+  u=clamp(u,0,9);
+  const p=base();p.x=-100;
+  if(u<0.7){
+    const k=u/0.7,r=ease(k/0.5),s2=ease((k-0.5)/0.5);
+    p.sy=0.86+0.36*r-0.06*s2;
+    p.lean=0.12-0.29*r;
+    p.ns=-14+7.6*r;
+    p.earL=4+106*r-5*s2;
+    p.earR=2+108*r-5*s2;
+  }else if(u<7.5){
+    const k=(u-0.7)/6.8,P=0.68,hp=(u-0.7)/P,n=Math.floor(hp),ph=hp-n;
+    const Hh=60+25*Math.sin(n*1.7);
+    const g=0.3;let sy,ears,y=0;
+    if(ph<g){
+      const q=ph/g;
+      sy=1.16-0.38*Math.sin(Math.PI*q);
+      ears=105+(35-105)*ease(q)-15*Math.sin(Math.PI*q);
+    }else{
+      const a=(ph-g)/(1-g);
+      y=Hh*4*a*(1-a);
+      sy=1+0.16*Math.abs(2*a-1);
+      ears=70-35*(1-2*a);
+    }
+    p.x=-100+230*Math.sin(Math.PI*k);
+    const vx=230*Math.cos(Math.PI*k)*Math.PI/6.8;
+    p.lean=-vx*0.0016;
+    p.ns=-vx*0.06;
+    p.y=y;p.sy=sy;
+    p.earL=ears+8*Math.sin(u*3);
+    p.earR=ears-8*Math.sin(u*3+1);
+  }else{
+    const s=u-7.5;
+    if(s<0.35){
+      const q=s/0.35,e=ease(q);
+      p.sy=lerp(1.16,1.0,e)-0.22*Math.sin(Math.PI*q);
+      const er=lerp(105,80,e)-20*Math.sin(Math.PI*q);
+      p.earL=er;p.earR=er-3;
+      p.lean=lerp(0.17,0,e);p.ns=lerp(6.4,0,e);
+    }else{
+      const d=s-0.35,dec=Math.exp(-d*1.1);
+      p.sy=1+0.03*Math.sin(d*2*Math.PI*8)*dec;
+      p.lean=0.11*Math.sin(d*2*Math.PI*4)*dec;
+      p.earL=80+18*Math.sin(d*2*Math.PI*4+1.6)*dec;
+      p.earR=77-18*Math.sin(d*2*Math.PI*4+1.6)*dec;
+      p.ns=-p.lean*40;
+    }
+  }
+  p.sx=1+(1-p.sy)*0.85;
+  p.belly=22+(1-p.sy)*20;
+  return p;
+}
+
+/* ---------- emotion 3: fear (17-26s) ---------- */
+function fear(v){
+  v=clamp(v,0,9);
+  let p=base();p.x=-100;let ta=1;
+  if(v<0.5){
+    const k=v/0.5,e=ease(k);
+    p.y=45*Math.sin(Math.PI*k);
+    p.sy=1+0.28*Math.sin(Math.PI*k);
+    const eb=lerp(80,-10,ease((k-0.45)/0.55));
+    p.earL=eb+25*Math.sin(Math.PI*k)+4;
+    p.earR=eb+25*Math.sin(Math.PI*k)-4;
+    p.lean=0.22*e;p.ns=-10*e;p.x=-100-30*e;ta=0.5*k;
+  }else if(v<3.5){
+    const m=(v-0.5)/3,e=ease(m);
+    p.x=-130-130*e;
+    p.y=2.5*Math.abs(Math.sin(v*11))*(1-Math.pow(m,4));
+    p.sy=lerp(0.92,0.86,e);p.lean=lerp(0.22,0.16,e);
+    p.earL=-6;p.earR=-14;p.ns=lerp(-10,-4,e);
+  }else if(v<6){
+    const m=(v-3.5)/2.5,e=ease(m*1.6);
+    p.x=-260;p.sy=lerp(0.86,0.68,e);p.lean=lerp(0.16,0.08,e);
+    p.earL=lerp(-6,-20,e);p.earR=lerp(-14,-20,e);p.ns=lerp(-4,2,e);ta=1.6;
+  }else if(v<7.3){
+    const m=(v-6)/1.3,e=ease(m);
+    p.x=-260;p.sy=lerp(0.68,0.82,e);p.lean=lerp(0.08,0.02,e);
+    p.earL=lerp(-20,-12,e);p.earR=lerp(-20,35,e);p.ns=lerp(2,12,e);ta=lerp(1.6,0.6,e);
+  }else{
+    const fl={x:-260,y:0,sx:1,sy:0.66,lean:0.12,ns:0,earL:-20,earR:-22,belly:22};
+    const pk={x:-260,y:0,sx:1,sy:0.82,lean:0.02,ns:12,earL:-12,earR:35,belly:22};
+    if(v<7.8){p=mix(pk,fl,ease((v-7.3)/0.2));ta=1.8;}
+    else{const e=ease((v-7.8)/1.2);p=mix(fl,sad(0),e);ta=1.8*(1-e);}
+  }
+  p.sx=1+(1-p.sy)*0.85;
+  p.belly=22+(1-p.sy)*20;
+  p.sx+=0.02*ta*Math.sin(v*71);
+  p.sy+=0.012*ta*Math.sin(v*57+1);
+  p.lean+=0.012*ta*Math.sin(v*63+2);
+  p.earL+=3*ta*Math.sin(v*80);
+  p.earR+=3*ta*Math.sin(v*77+1);
+  return p;
+}
+
+function pose(t){
+  const w=0.25;
+  if(t<8-w)return sad(t);
+  if(t<8+w)return mix(sad(t),joy(t-8),ease((t-8+w)/(2*w)));
+  if(t<17-w)return joy(t-8);
+  if(t<17+w)return mix(joy(t-8),fear(t-17),ease((t-17+w)/(2*w)));
+  return fear(t-17);
+}
+
+/* ---------- drawing ---------- */
+function applyXf(p){
+  ctx.translate(CX+p.x,FLOOR-p.y);
+  ctx.transform(1,0,p.lean,1,0,0);
+  ctx.scale(p.sx,p.sy);
+}
+function drawSack(p){
+  const w=85,h=200,nw=38,el=60,b=p.belly,ns=p.ns;
+  const eR=clamp(p.earR,-35,100)*Math.PI/180,eL=clamp(p.earL,-35,100)*Math.PI/180;
+  const nr=[nw+ns,-h],nl=[-nw+ns,-h],k=[ns,-h-8];
+  const mR=[(nr[0]+k[0])/2,(nr[1]+k[1])/2],mL=[(nl[0]+k[0])/2,(nl[1]+k[1])/2];
+  const tR=[mR[0]+el*Math.cos(eR),mR[1]-el*Math.sin(eR)];
+  const tL=[mL[0]-el*Math.cos(eL),mL[1]-el*Math.sin(eL)];
+
+  ctx.save();applyXf(p);
+  ctx.beginPath();
+  ctx.moveTo(-w+14,0);
+  ctx.lineTo(w-14,0);
+  ctx.quadraticCurveTo(w+4,0,w+4,-16);
+  ctx.bezierCurveTo(w+b,-h*0.42,nr[0]+34,-h*0.8,nr[0],nr[1]);
+  ctx.quadraticCurveTo(nr[0]+(tR[0]-nr[0])*0.5+10,nr[1]+(tR[1]-nr[1])*0.5+8,tR[0],tR[1]);
+  ctx.quadraticCurveTo(tR[0]+(k[0]-tR[0])*0.5-4,tR[1]+(k[1]-tR[1])*0.5-8,k[0],k[1]);
+  ctx.quadraticCurveTo(k[0]+(tL[0]-k[0])*0.5+4,k[1]+(tL[1]-k[1])*0.5-8,tL[0],tL[1]);
+  ctx.quadraticCurveTo(tL[0]+(nl[0]-tL[0])*0.5-10,tL[1]+(nl[1]-tL[1])*0.5+8,nl[0],nl[1]);
+  ctx.bezierCurveTo(nl[0]-34,-h*0.8,-w-b,-h*0.42,-w-4,-16);
+  ctx.quadraticCurveTo(-w-4,0,-w+14,0);
+  ctx.closePath();
+  ctx.restore();
+
+  const gx=CX+p.x;
+  const g=ctx.createLinearGradient(gx-120*p.sx,0,gx+120*p.sx,0);
+  g.addColorStop(0,'#c4a97e');g.addColorStop(0.45,'#eadbb8');g.addColorStop(0.75,'#f1e4c6');g.addColorStop(1,'#d3bd95');
+  ctx.fillStyle=g;ctx.fill();
+  ctx.lineWidth=3.2;ctx.lineJoin='round';ctx.strokeStyle='#4e3b28';ctx.stroke();
+
+  // creases
+  ctx.save();applyXf(p);
+  ctx.beginPath();
+  ctx.moveTo(-58,-38);ctx.quadraticCurveTo(-28,-62,4,-44);
+  ctx.moveTo(30,-96);ctx.quadraticCurveTo(58,-112,72,-142);
+  ctx.moveTo(-70,-120);ctx.quadraticCurveTo(-52,-100,-56,-70);
+  ctx.moveTo(-14,-160);ctx.quadraticCurveTo(6,-150,26,-158);
+  ctx.restore();
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(78,59,40,0.22)';ctx.stroke();
+
+  // tie at the neck
+  ctx.save();applyXf(p);
+  ctx.beginPath();
+  ctx.moveTo(nl[0]-3,nl[1]+5);
+  ctx.quadraticCurveTo(ns,-h+16,nr[0]+3,nr[1]+5);
+  ctx.restore();
+  ctx.lineWidth=6;ctx.strokeStyle='#8a6a48';ctx.stroke();
+  ctx.lineWidth=2;ctx.strokeStyle='#4e3b28';ctx.stroke();
+}
+
+function render(t){
+  let g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#f7f0e2');g.addColorStop(1,'#e4d5bb');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  g=ctx.createRadialGradient(CX,FLOOR-140,60,CX,FLOOR-140,520);
+  g.addColorStop(0,'rgba(255,250,235,0.55)');g.addColorStop(1,'rgba(255,250,235,0)');
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  g=ctx.createLinearGradient(0,FLOOR,0,H);
+  g.addColorStop(0,'#c8b08a');g.addColorStop(1,'#a28966');
+  ctx.fillStyle=g;ctx.fillRect(0,FLOOR,W,H-FLOOR);
+  ctx.fillStyle='rgba(80,60,35,0.4)';ctx.fillRect(0,FLOOR-1,W,2);
+
+  const p=pose(t);
+  const sh=1-clamp(p.y/260,0,0.7);
+  ctx.fillStyle='rgba(50,36,18,'+(0.3*sh)+')';
+  ctx.beginPath();
+  ctx.ellipse(CX+p.x-p.lean*60,FLOOR+3,108*p.sx*sh,15*sh,0,0,Math.PI*2);
+  ctx.fill();
+  drawSack(p);
+}
+
+let t0=null;
+function frame(now){
+  if(t0===null)t0=now;
+  render(((now-t0)/1000)%T);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+{
+ "slug": "drop-01",
+ "title": "Drop 01",
+ "subject": "Opus 5.5",
+ "type_label": "Drop",
+ "date": "2026-09-27",
+ "intro": "A Drop runs a new model on the same setup. Here, Opus 5.5 runs against two baselines, Fable 5.1 and Opus 5, on five sealed briefs. Each model got one bare call per brief: no tools, no files, no memory. Below are the first attempts, unedited, shown as A, B and C. One of the three is the new model.",
+ "guess_line": "Pick the new model on each brief, then reveal. The reveal also opens the verdicts, attempts #2 and #3, and the method.",
+ "record_question": "Which one is the new model?",
+ "record_text_line": "The opening of each page. Full pages in the gallery.",
+ "bar": "Would I accept this as a first pass from a junior on my team?",
+ "briefs": [
+  {
+   "id": "01-walk-cycle",
+   "n": 1,
+   "name": "Pencil-test walk cycle",
+   "line": "A hand-drawn walk cycle on a loop.",
+   "sha256": "40ef06a60b94a5b035786a5f50720454755c9539504272e4a92e6472b5064021",
+   "kind": "html",
+   "takes": [
+    {
+     "letter": "A",
+     "kind": "html",
+     "src": "takes/01-walk-cycle/A/attempt-1.html",
+     "notes": []
+    },
+    {
+     "letter": "B",
+     "kind": "html",
+     "src": "takes/01-walk-cycle/B/attempt-1.html",
+     "notes": [
+      "[name] replaces the account name in this take. Nothing else is changed."
+     ]
+    },
+    {
+     "letter": "C",
+     "kind": "html",
+     "src": "takes/01-walk-cycle/C/attempt-1.html",
+     "notes": []
+    }
+   ]
+  },
+  {
+   "id": "02-fighter-sprite",
+   "n": 2,
+   "name": "16-bit fighter sprite",
+   "line": "An original fighter: idle, one punch, back to idle.",
+   "sha256": "c1a63a4d9ee5872526ff6ab0352cd09b101b9ec335e4a2e6f3d7a76c37a4f939",
+   "kind": "html",
+   "takes": [
+    {
+     "letter": "A",
+     "kind": "html",
+     "src": "takes/02-fighter-sprite/A/attempt-1.html",
+     "notes": []
+    },
+    {
+     "letter": "B",
+     "kind": "html",
+     "src": "takes/02-fighter-sprite/B/attempt-1.html",
+     "notes": []
+    },
+    {
+     "letter": "C",
+     "kind": "html",
+     "src": "takes/02-fighter-sprite/C/attempt-1.html",
+     "notes": []
+    }
+   ]
+  },
+  {
+   "id": "03-cold-open",
+   "n": 3,
+   "name": "Comedic cold open",
+   "line": "A one-page sitcom cold open that ends on a joke.",
+   "sha256": "aa381a3263c9e87004387e9a6cd79b3de4d7571fdfdc065340dd76d4030fe83e",
+   "kind": "text",
+   "takes": [
+    {
+     "letter": "A",
+     "kind": "text",
+     "src": "takes/03-cold-open/A/attempt-1.txt",
+     "notes": []
+    },
+    {
+     "letter": "B",
+     "kind": "text",
+     "src": "takes/03-cold-open/B/attempt-1.txt",
+     "notes": []
+    },
+    {
+     "letter": "C",
+     "kind": "text",
+     "src": "takes/03-cold-open/C/attempt-1.txt",
+     "notes": []
+    }
+   ]
+  },
+  {
+   "id": "04-micro-film",
+   "n": 4,
+   "name": "Wordless micro-film",
+   "line": "A 30–45 second silent story with a turn. Plays once.",
+   "sha256": "e07996f0f74ddc046c1d6ab8f048a0b93e3a7cf97eca4d6b9b3e5291d822e127",
+   "kind": "html",
+   "takes": [
+    {
+     "letter": "A",
+     "kind": "html",
+     "src": "takes/04-micro-film/A/attempt-1.html",
+     "notes": []
+    },
+    {
+     "letter": "B",
+     "kind": "html",
+     "src": "takes/04-micro-film/B/attempt-1.html",
+     "notes": []
+    },
+    {
+     "letter": "C",
+     "kind": "html",
+     "src": "takes/04-micro-film/C/attempt-1.html",
+     "notes": []
+    }
+   ]
+  },
+  {
+   "id": "05-flour-sack",
+   "n": 5,
+   "name": "Flour-sack test",
+   "line": "A plain flour sack, three emotions, no face or limbs.",
+   "sha256": "c2629f15945530bc8ad5ecbbc1ba820f9d08528fea7e00728005d955a4725f87",
+   "kind": "html",
+   "takes": [
+    {
+     "letter": "A",
+     "kind": "html",
+     "src": "takes/05-flour-sack/A/attempt-1.html",
+     "notes": []
+    },
+    {
+     "letter": "B",
+     "kind": "html",
+     "src": "takes/05-flour-sack/B/attempt-1.html",
+     "notes": [
+      "The command-line tool sent one automatic message before this reply. The take is the model's reply, unedited."
+     ]
+    },
+    {
+     "letter": "C",
+     "kind": "html",
+     "src": "takes/05-flour-sack/C/attempt-1.html",
+     "notes": []
+    }
+   ]
+  }
+ ]
+}

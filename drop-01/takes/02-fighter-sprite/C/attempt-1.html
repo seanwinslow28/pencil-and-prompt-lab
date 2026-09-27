@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#141418;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{width:960px;height:540px;image-rendering:pixelated;image-rendering:crisp-edges;background:#000}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+(function(){
+"use strict";
+const PAL={
+ K:'#1c1024',H:'#2c3a6a',h:'#4a5c9c',Y:'#f8d048',y:'#c89020',
+ S:'#f4b890',D:'#c8825a',R:'#e04828',r:'#a02818',W:'#f0ece0',w:'#b8b0a0',
+ B:'#2a2a3a',G:'#3868d8',g:'#203c90',X:'#ffffff',O:'#f88820',Q:'#e8e0d0'
+};
+
+/* ---------- idle A (40x44) ---------- */
+const A=[
+"........................................",
+"...................KKKK.................",
+"..............K...KHHHHK................",
+"..............KK.KHHHHHHK...............",
+"...............KKHHhHHHHHK..............",
+"..............KHHHHhHHHHHK..............",
+"..........KKKKKHHHYYYYYYYYK.............",
+"........KKYYYYYYYYYYYYYYYYK.............",
+".......KYYyyyKKKKHSSSSSSSDK.............",
+"........KKKK....KHSSKSSSKSK.............",
+"................KHSSSSSSSDK.............",
+".................KDSSSSSSDK.............",
+".................KDSSSKKSDK.............",
+"..................KDDSSSDK......KKK.....",
+"................KKKKKSSKK......KGGGK....",
+"..............KKKGGGKSSKKKKK...KGGGK....",
+".............KRRKGGGGKRRRRRRRK.KgggK....",
+"............KSSSKGGGGKRRRRRRSSSKSSK.....",
+"............KSSSKggggKRRRRRRKSSKSSK.....",
+"............KSSSKKKKKKRRRRRRKSSKSSK.....",
+"............KSSSSSKRRRRRRRRRKSSKSSK.....",
+"...........KSSSSSKRRRRRRRRRRKSSKSSK.....",
+"...........KDDDDKRRRRRRRRRRRKSSSSSK.....",
+"............KKKKKRRRRRRRRRRRKDDDDK......",
+"................KrrRRRRRRRRRKKKKK.......",
+"................KrrRRRRRRRRRK...........",
+"................KrrRRRRRRRRRK...........",
+"................KBBBBBBBBBBBK...........",
+"................KBBBBBBYBBBBK...........",
+"................KWWWWWWWWWWWK...........",
+"...............KwWWWWWWWWWWWK...........",
+"..............KwWWWWWKWWWWWWWK..........",
+".............KwWWWWWK.KWWWWWWK..........",
+"............KwWWWWWK...KWWWWWWK.........",
+"............KwWWWWWK...KWWWWWWK.........",
+"...........KwWWWWWK.....KWWWWWWK........",
+"...........KwWWWWWK.....KWWWWWWK........",
+"...........KwWWWWWK.....KWWWWWWK........",
+"...........KwwWWWWK.....KWWWWWwK........",
+"...........KKKKKKKK.....KKKKKKKK........",
+"..........KSSSSSSSK.....KSSSSSSSSK......",
+".........KSSSSSSSSK.....KSSSSSSSSSK.....",
+".........KDDDDDDDDK.....KDDDDDDDDDK.....",
+".........KKKKKKKKKK.....KKKKKKKKKKK....."
+];
+
+/* ---------- windup (rear fist chambered) ---------- */
+const Wraw=A.slice();
+Wraw[14]="...................KKSSKK......KGGGK....";
+Wraw[15]="..............KKKKKKKSSKKKKK...KGGGK....";
+Wraw[16]=".............KRRRRRRRRRRRRRRRK.KgggK....";
+Wraw[17]="............KSSSKRRRRRRRRRRRSSSKSSK.....";
+Wraw[18]="...........KSSSKrRRRRRRRRRRRKSSKSSK.....";
+Wraw[19]="..........KSSSKrrRRRRRRRRRRRKSSKSSK.....";
+Wraw[20]=".........KSSSKrrRRRRRRRRRRRRKSSKSSK.....";
+Wraw[21]="........KSSSSSKKKKKKRRRRRRRRKSSKSSK.....";
+Wraw[22]="........KSSSSSKGGGGGKRRRRRRRKSSSSSK.....";
+Wraw[23]="........KDDDDDKGGGGGKRRRRRRRKDDDDK......";
+Wraw[24]=".........KKKKKKgggggKRRRRRRRKKKKK.......";
+Wraw[25]="..............KKKKKKKRRRRRRRK...........";
+
+/* ---------- punch extended (52x44) ---------- */
+const P=[
+"....................................................",
+".......................KKKK.........................",
+"..................K...KHHHHK........................",
+"..................KK.KHHHHHHK.......................",
+"...................KKHHhHHHHHK......................",
+"..................KHHHHhHHHHHK......................",
+"...........KKKKKKKKHHHYYYYYYYYK.....................",
+".........KYYYYYYYYYYYYYYYYYYYYK.....................",
+"........KYYyyyyKKKKKKHSSSSSSSDK.....................",
+".........KKKKKK.....KHSSKSSSKSK.....................",
+"....................KHSSSSSSSDK.....................",
+".....................KDSSSSSSDK.....................",
+".....................KDSSSKKSDK.....................",
+"......................KDDSSSDK....KKK...............",
+".......................KKSSKK....KGGGK..............",
+"..................KKKKKKKSSKKKK..KGGGK..............",
+"................KRRRRRRRRRRRRRRRKKgggK.......KKKKK..",
+"...............KRRRRRKKKKKKKKKKKKKKKKKKKKKKKKGGGGGK.",
+"..............KRRRRRKSSSSSSSSSSSSSSSSSSSSSSSKGGGGGK.",
+"..............KRRRRRKSSSSSSSSSSSSSSSSSSSSSSSKGGGGGK.",
+"..............KRRRRRKDDDDDDDDDDDDDDDDDDDDDDDKgggggK.",
+"..............KRRRRRKKKKKKKKKKKKKKKKKKKKKKKKK.KKKKK..",
+"..............KrRRRRRRRRRRRRRRRKDDDDK...............",
+"..............KrRRRRRRRRRRRRRRRKKKKK................",
+"...............KrrRRRRRRRRRRRRK.....................",
+"...............KrrRRRRRRRRRRRRK.....................",
+"................KrrRRRRRRRRRRRK.....................",
+"................KBBBBBBBBBBBBBK.....................",
+".................KBBBBBBBBYBBBK.....................",
+".................KWWWWWWWWWWWWK.....................",
+"................KwWWWWWWWWWWWWWK....................",
+"...............KwWWWWWKWWWWWWWWWK...................",
+"..............KwWWWWWK...KWWWWWWWWK.................",
+".............KwWWWWWK......KWWWWWWWK................",
+"............KwWWWWWK.........KWWWWWWWK..............",
+"...........KwWWWWWK...........KWWWWWWWK.............",
+"..........KwWWWWWK.............KWWWWWWK.............",
+".........KwWWWWWK..............KWWWWWWK.............",
+"........KwwWWWWK...............KWWWWWwK.............",
+"........KKKKKKKK...............KKKKKKKK.............",
+"......KSSSSSSSSK...............KSSSSSSSSSK..........",
+".....KSSSSSSSSSK...............KSSSSSSSSSSK.........",
+".....KDDDDDDDDDK...............KDDDDDDDDDDK.........",
+".....KKKKKKKKKKK...............KKKKKKKKKKKK........."
+];
+
+/* ---------- recovery (arm half retracted) ---------- */
+const Rc=P.slice();
+Rc[16]="................KRRRRRRRRRRRRRRRKKgggK..............";
+Rc[17]="...............KRRRRRKRRRRRRRRRRK.KKKKK.............";
+Rc[18]="..............KRRRRRKKKKKKKKKKKKKKGGGGGK............";
+Rc[19]="..............KRRRRRKSSSSSSSSSSSSKGGGGGK............";
+Rc[20]="..............KRRRRRKSSSSSSSSSSSSKGGGGGK............";
+Rc[21]="..............KRRRRRKDDDDDDDDDDDDKgggggK............";
+Rc[22]="..............KRRRRRKKKKKKKKKKKKK.KKKKK.............";
+
+/* breathing squash: head + front fist sink one pixel */
+function bob(src,fix){
+ const out=src.map((row,i)=>row.split('').map((c,x)=>{
+  const head=(x<=27&&i<=14), fist=(x>=31&&i>=13&&i<=20);
+  if(head||fist) return i>0?src[i-1][x]:'.';
+  return c;
+ }).join(''));
+ if(fix){const r=out[14].split('');for(let x=16;x<=20;x++)r[x]='K';out[14]=r.join('');}
+ return out;
+}
+
+/* ---------- effects ---------- */
+const SP1=[
+"...Y...",
+"..YXY..",
+".YXXXY.",
+"YXXXXXY",
+".YXXXY.",
+"..YXY..",
+"...Y..."];
+const SP2=[
+"......O......",
+"......Y......",
+"..O...Y...O..",
+"...O.YXY.O...",
+"....YYXYY....",
+".OYYYXXXYYYO.",
+"OYXXXXXXXXXYO",
+".OYYYXXXYYYO.",
+"....YYXYY....",
+"...O.YXY.O...",
+"..O...Y...O..",
+"......Y......",
+"......O......"];
+const SP3=[
+"......O......",
+".............",
+"..O.......O..",
+".............",
+".............",
+".............",
+"O...........O",
+".............",
+".............",
+".............",
+"..O.......O..",
+".............",
+"......O......"];
+const DU1=["..Q..",".QQQ.","QQ.QQ"];
+const DU2=["Q...Q",".Q.Q.","Q...Q"];
+
+function mk(rows){
+ const w=Math.max(...rows.map(r=>r.length)),h=rows.length;
+ const c=document.createElement('canvas');c.width=w;c.height=h;
+ const q=c.getContext('2d');
+ rows.forEach((r,y)=>{for(let x=0;x<r.length;x++){const ch=r[x];if(PAL[ch]){q.fillStyle=PAL[ch];q.fillRect(x,y,1,1);}}});
+ return c;
+}
+
+const FR={A:mk(A),B:mk(bob(A,true)),W:mk(bob(Wraw,false)),P:mk(P),R:mk(Rc)};
+const FX={s1:mk(SP1),s2:mk(SP2),s3:mk(SP3),d1:mk(DU1),d2:mk(DU2)};
+
+/* ---------- stage ---------- */
+const BW=192,BH=108,SC=5;
+const buf=document.createElement('canvas');buf.width=BW;buf.height=BH;
+const g=buf.getContext('2d');
+const cv=document.getElementById('c');const ctx=cv.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+
+const bx=66,by=53;   /* fighter origin: feet land on y=96 */
+const PX=119;        /* makiwara centre */
+
+function drawBG(){
+ g.fillStyle='#3a2416';g.fillRect(-6,-4,204,14);
+ g.fillStyle='#6a4628';g.fillRect(-6,6,204,1);
+ g.fillStyle='#2a1a10';g.fillRect(-6,9,204,1);
+ g.fillStyle='#caa878';g.fillRect(-6,10,204,74);
+ g.fillStyle='#b08c5c';g.fillRect(-6,10,204,2);
+ for(let p=-1;p<5;p++){
+  const x=4+p*48;
+  g.fillStyle='#ece4cc';g.fillRect(x,16,40,58);
+  g.fillStyle='#dccfb2';g.fillRect(x,60,40,14);
+  g.fillStyle='#6a4628';
+  for(let i=0;i<=3;i++)g.fillRect(x+Math.min(i*13,39),16,1,58);
+  for(let j=0;j<=4;j++)g.fillRect(x,16+Math.min(j*14,57),40,1);
+  g.fillStyle='#5a3a22';g.fillRect(x+40,10,8,74);
+  g.fillStyle='#7a5432';g.fillRect(x+41,10,2,74);
+  g.fillStyle='#2a1a10';g.fillRect(x+47,10,1,74);
+ }
+ g.fillStyle='#4a2e1a';g.fillRect(-6,76,204,8);
+ g.fillStyle='#6a4628';g.fillRect(-6,76,204,1);
+ g.fillStyle='#2a1a10';g.fillRect(-6,83,204,1);
+ g.fillStyle='#8c9c4a';g.fillRect(-6,84,204,30);
+ g.fillStyle='#98a856';for(let y=85;y<114;y+=2)g.fillRect(-6,y,204,1);
+ g.fillStyle='#5c6c2a';for(let x=0;x<=192;x+=48)g.fillRect(x-1,84,2,30);
+ g.fillRect(-6,100,204,1);g.fillStyle='#6c7c3a';g.fillRect(-6,101,204,1);
+ g.fillStyle='#3a2a18';g.fillRect(-6,84,204,1);
+}
+
+function drawPost(bend,flash){
+ g.fillStyle='#3a2416';g.fillRect(PX-6,95,13,4);
+ g.fillStyle='#5a3a22';g.fillRect(PX-5,96,11,1);
+ for(let y=54;y<96;y++){
+  const dx=Math.round(bend*(97-y)/43);
+  g.fillStyle='#5a3a22';g.fillRect(PX-2+dx,y,6,1);
+  g.fillStyle='#8a5a34';g.fillRect(PX-1+dx,y,1,1);
+  g.fillStyle='#2a1a10';g.fillRect(PX+3+dx,y,1,1);
+  if(y===54||y===55){g.fillStyle='#1c1024';g.fillRect(PX-2+dx,y,6,1);}
+ }
+ for(let y=62;y<78;y++){
+  const dx=Math.round(bend*(97-y)/43);
+  g.fillStyle=flash?'#ffffff':'#d8b048';g.fillRect(PX-4+dx,y,10,1);
+  g.fillStyle='#1c1024';
+  if(y===62||y===77){g.fillRect(PX-4+dx,y,10,1);}
+  else{
+   g.fillRect(PX-4+dx,y,1,1);g.fillRect(PX+5+dx,y,1,1);
+   if(!flash&&(y%4===1)){g.fillStyle='#8a6a20';g.fillRect(PX-3+dx,y,8,1);}
+  }
+ }
+}
+
+function drawShadow(cx){
+ g.fillStyle='#5e6e30';
+ g.fillRect(cx-11,96,23,1);
+ g.fillRect(cx-15,97,31,1);
+ g.fillRect(cx-11,98,23,1);
+}
+
+/* ---------- timeline ---------- */
+const seq=[
+ ['A',14],['B',14],['A',14],['B',14],['A',14],['B',16],
+ ['W',7],
+ ['P',9,1],
+ ['R',5],
+ ['W',6],
+ ['B',10]
+];
+let si=0,st=0,hitstop=0,sparkT=-1,shakeT=0,postT=-1,pT=0;
+
+function tick(){
+ if(hitstop>0){hitstop--;}
+ else{
+  st++;
+  if(st>=seq[si][1]){
+   st=0;si=(si+1)%seq.length;
+   if(seq[si][2]){hitstop=8;sparkT=0;shakeT=10;postT=0;pT=0;}
+  }
+ }
+ if(sparkT>=0){sparkT++;if(sparkT>13)sparkT=-1;}
+ if(shakeT>0)shakeT--;
+ if(postT>=0){postT++;if(postT>90)postT=-1;}
+ if(seq[si][0]==='P')pT++;
+}
+
+function render(){
+ const sx=shakeT>0?Math.round(Math.cos(shakeT*2.4)*2*shakeT/10):0;
+ const sy=shakeT>0?Math.round(Math.sin(shakeT*1.7)*shakeT/10):0;
+ g.fillStyle='#000';g.fillRect(0,0,BW,BH);
+ g.save();g.translate(sx,sy);
+ drawBG();
+ let bend=0;
+ if(hitstop>0)bend=3;
+ else if(postT>=8){const t=postT-8;bend=Math.round(3*Math.cos(t*0.5)*Math.exp(-t/12));}
+ drawPost(bend,sparkT>=0&&sparkT<2);
+ const name=seq[si][0];
+ const fr=FR[name];
+ drawShadow(fr.width>40?bx+25:bx+22);
+ if(name==='P'&&pT<8){g.drawImage(pT<4?FX.d1:FX.d2,bx-2,by+38);}
+ g.drawImage(fr,bx,by);
+ if(sparkT>=0){
+  const cx=bx+51,cy=by+19;
+  if(sparkT<2)g.drawImage(FX.s1,cx-3,cy-3);
+  else if(sparkT<8)g.drawImage(FX.s2,cx-6,cy-6);
+  else g.drawImage(FX.s3,cx-6,cy-6);
+ }
+ g.restore();
+ ctx.imageSmoothingEnabled=false;
+ ctx.drawImage(buf,0,0,BW*SC,BH*SC);
+}
+
+let last=performance.now(),acc=0;const STEP=1000/60;
+function loop(now){
+ acc+=Math.min(now-last,100);last=now;
+ while(acc>=STEP){tick();acc-=STEP;}
+ render();
+ requestAnimationFrame(loop);
+}
+render();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

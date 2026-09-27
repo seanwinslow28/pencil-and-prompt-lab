@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html,body{margin:0;height:100%;background:#0c0c14;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas{width:960px;height:540px;image-rendering:pixelated;image-rendering:crisp-edges;background:#000}
+</style>
+</head>
+<body>
+<canvas id="c" width="960" height="540"></canvas>
+<script>
+(function(){
+const W=320,H=180,S=3,CX=140,GY=152;
+const main=document.getElementById('c'),mctx=main.getContext('2d');
+mctx.imageSmoothingEnabled=false;
+const off=document.createElement('canvas');off.width=W;off.height=H;
+const bgc=document.createElement('canvas');bgc.width=W;bgc.height=H;
+let g=off.getContext('2d');
+
+const OUT='#1a1024',SKIN='#cc7c4c',SKIN_SH='#8e4a2a',HAIR='#22182a',HAIR_L='#3e2c4c',
+PANT='#2f7040',PANT_SH='#1a4628',SASH='#e46a2c',SASH_SH='#a23818',WRAP='#f0e8d4',WRAP_SH='#b4a88c',
+BAND='#dc3232',BAND_SH='#8a1a22',WHITE='#fff8f0',YEL='#ffe040',ORG='#ff8a20',DUST='#c2b4a4',DUST_D='#8c7e70',
+WOOD='#a8743c',WOOD_SH='#6e4622',ROPE='#d8c08a',ROPE_SH='#a88a56',SHD='#4a2616';
+
+function px(x,y,c){g.fillStyle=c;g.fillRect(x|0,y|0,1,1);}
+function rect(x,y,w,h,c){g.fillStyle=c;g.fillRect(x|0,y|0,w,h);}
+function line(x1,y1,x2,y2,w,c){
+  x1=Math.round(x1);y1=Math.round(y1);x2=Math.round(x2);y2=Math.round(y2);
+  let dx=Math.abs(x2-x1),sx=x1<x2?1:-1,dy=-Math.abs(y2-y1),sy=y1<y2?1:-1,err=dx+dy,o=Math.floor(w/2);
+  g.fillStyle=c;
+  for(;;){g.fillRect(x1-o,y1-o,w,w);if(x1===x2&&y1===y2)break;const e2=2*err;if(e2>=dy){err+=dy;x1+=sx;}if(e2<=dx){err+=dx;y1+=sy;}}
+}
+function circle(cx,cy,r,c){g.fillStyle=c;for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++)if(x*x+y*y<=r*r+r)g.fillRect(cx+x,cy+y,1,1);}
+function shadow(cx,cy,rx,ry,c){for(let y=-ry;y<=ry;y++){const w=Math.round(rx*Math.sqrt(Math.max(0,1-(y*y)/(ry*ry+0.5))));rect(cx-w,cy+y,2*w+1,1,c);}}
+function limb(a,b,w,c,cs){
+  line(a[0],a[1],b[0],b[1],w+2,OUT);
+  line(a[0],a[1],b[0],b[1],w,cs);
+  if(w>2)line(a[0]-1,a[1]-1,b[0]-1,b[1]-1,w-2,c);
+}
+
+/* ---------- background (drawn once) ---------- */
+(function drawBG(){
+  g=bgc.getContext('2d');
+  const sky=['#221a50','#3a2468','#6c2e6c','#aa405a','#da6a3e','#f2a44a'];
+  for(let y=0;y<142;y++){
+    const f=Math.min(y,118)/118*(sky.length-1);const i=Math.min(Math.floor(f),sky.length-1),fr=f-i;
+    for(let x=0;x<W;x++){let c=sky[i];if(fr>0.55&&i<sky.length-1&&((x+y)&1)===0)c=sky[i+1];px(x,y,c);}
+  }
+  const stars=[[20,8],[57,19],[91,5],[132,14],[170,26],[210,9],[248,21],[289,6],[304,30],[40,36],[118,40],[266,44]];
+  for(const s of stars)px(s[0],s[1],'#8c78c0');
+  px(91,5,'#d8ccff');px(248,21,'#d8ccff');
+  circle(236,94,17,'#ffd460');circle(234,92,12,'#fff0a8');
+  const mh=x=>92+12*Math.sin(x/23)+8*Math.sin(x/9+2)+4*Math.sin(x/4.3);
+  const mh2=x=>106+7*Math.sin(x/15+1)+4*Math.sin(x/6)+2*Math.sin(x/2.7);
+  for(let x=0;x<W;x++){const h=Math.round(mh(x));rect(x,h,1,142-h,'#2c1c4a');}
+  for(let x=0;x<W;x++){const h=Math.round(mh2(x));rect(x,h,1,142-h,'#1c1434');}
+  const ph=Math.round(mh2(52))-2,PG='#1c1434';
+  rect(46,ph-6,13,6,PG);rect(43,ph-8,19,2,PG);rect(48,ph-14,9,6,PG);rect(45,ph-16,15,2,PG);
+  rect(50,ph-21,5,5,PG);rect(47,ph-23,11,2,PG);rect(52,ph-27,1,4,PG);
+  const FO='#2a1810';
+  for(const ry of [116,130]){rect(0,ry,W,4,FO);rect(0,ry+1,W,2,'#5a3626');rect(0,ry+1,W,1,'#7c4e36');}
+  for(let x=6;x<W;x+=40){rect(x-1,108,6,34,FO);rect(x,109,4,33,'#5a3626');rect(x,109,1,33,'#7c4e36');rect(x-2,107,8,2,FO);rect(x-1,107,6,1,'#6c4232');}
+  rect(0,142,W,38,'#7c4a30');
+  for(let r=0;r<4;r++){const y=143+r*10;const c=r%2?'#845233':'#74442a';rect(0,y,W,10,c);rect(0,y+9,W,1,'#4a2a1c');
+    for(let x=(r*13)%32;x<W;x+=32)rect(x,y,1,9,'#4a2a1c');
+    for(let x=(r*7)%20+4;x<W;x+=27)rect(x,y+3+(r%3),5,1,r%2?'#8e5c3c':'#7c4c30');}
+  rect(0,142,W,1,'#a46c46');rect(0,141,W,1,FO);
+  rect(0,173,W,7,'#583222');rect(0,173,W,1,'#3a2016');
+  g=off.getContext('2d');
+})();
+
+/* ---------- makiwara post ---------- */
+function drawPost(pxs,ground,ox){
+  const top=ground-66,hgt=ground-top;
+  const at=y=>pxs+ox*(ground-y)/hgt;
+  shadow(pxs+2,ground+1,7,2,SHD);
+  line(pxs,ground,pxs+ox,top,9,OUT);
+  line(pxs,ground,pxs+ox,top,7,WOOD_SH);
+  line(pxs-1,ground,pxs+ox-1,top,4,WOOD);
+  rect(at(top)-5,top-2,11,3,OUT);rect(at(top)-4,top-1,9,1,WOOD);
+  for(let y=top+3;y<=top+22;y++){const x=Math.round(at(y));rect(x-6,y,13,1,OUT);}
+  for(let y=top+4;y<=top+21;y++){const x=Math.round(at(y));const k=(y-top)%3;rect(x-5,y,11,1,k===0?ROPE_SH:ROPE);if(k===1)rect(x-4,y,3,1,'#f0dca8');}
+}
+
+/* ---------- fighter ---------- */
+const P=o=>Object.assign({
+  bf:[-16,0],bk:[-13,-20],ff:[12,0],fk:[9,-20],
+  hip:[-3,-40],neck:[0,-64],head:[3,-73],
+  bs:[-5,-61],be:[-12,-50],bh:[0,-56],
+  fs:[5,-61],fe:[13,-52],fh:[17,-63],
+  front:false,tail:0},o);
+const idleA=P({});
+const idleB=P({hip:[-3,-39],neck:[0,-63],head:[3,-72],bs:[-5,-60],be:[-12,-49],bh:[0,-55],fs:[5,-60],fe:[13,-51],fh:[17,-62],bk:[-13,-19],fk:[9,-19]});
+const idleC=P({bh:[1,-57],fh:[18,-64],be:[-11,-50],fe:[14,-53]});
+const wind=P({bk:[-14,-19],fk:[8,-19],hip:[-5,-39],neck:[-4,-63],head:[-1,-72],bs:[-9,-60],be:[-17,-52],bh:[-13,-57],fs:[1,-60],fe:[8,-55],fh:[12,-65],tail:1});
+const ext=P({bf:[-15,0],bk:[-11,-19],ff:[20,0],fk:[16,-20],hip:[4,-40],neck:[10,-63],head:[14,-71],bs:[8,-60],be:[20,-60],bh:[30,-60],fs:[10,-61],fe:[8,-53],fh:[13,-58],front:true,tail:2});
+const hit=P({bf:[-15,0],bk:[-9,-21],ff:[22,0],fk:[18,-20],hip:[6,-40],neck:[12,-63],head:[16,-70],bs:[10,-60],be:[24,-60],bh:[38,-60],fs:[11,-61],fe:[9,-53],fh:[14,-58],front:true,tail:2});
+const retr=P({ff:[16,0],fk:[12,-20],hip:[1,-40],neck:[5,-64],head:[8,-72],bs:[3,-61],be:[10,-52],bh:[12,-57],fs:[7,-61],fe:[14,-52],fh:[18,-63],front:true,tail:1});
+const seq=[[idleA,10],[idleB,10],[idleA,10],[idleC,10],[idleA,10],[idleB,10],[wind,6],[ext,2],[hit,10],[retr,5]];
+const frames=[];seq.forEach((s,i)=>{for(let l=0;l<s[1];l++)frames.push({p:s[0],i,l});});
+const total=frames.length;
+
+function hand(h){rect(h[0]-4,h[1]-4,8,8,OUT);rect(h[0]-3,h[1]-3,6,6,WRAP_SH);rect(h[0]-3,h[1]-3,4,4,WRAP);px(h[0]+1,h[1]-1,WRAP_SH);px(h[0]+1,h[1]+1,WRAP_SH);}
+function arm(s,e,h){limb(s,e,5,SKIN,SKIN_SH);limb(e,h,5,SKIN,SKIN_SH);
+  const dx=h[0]-e[0],dy=h[1]-e[1],L=Math.hypot(dx,dy)||1;const wx=h[0]-dx/L*4,wy=h[1]-dy/L*4;line(wx,wy,h[0],h[1],5,WRAP_SH);hand(h);}
+function leg(hipPt,k,f){
+  const an=[f[0],f[1]-3];
+  limb(hipPt,k,7,PANT,PANT_SH);limb(k,an,6,PANT,PANT_SH);
+  rect(f[0]-4,f[1]-4,10,5,OUT);rect(f[0]-3,f[1]-3,8,3,SKIN);rect(f[0]-3,f[1]-3,5,1,SKIN);rect(f[0]+2,f[1]-1,3,1,SKIN_SH);
+  rect(f[0]-3,f[1]-3,6,1,WRAP);
+}
+function headTail(h,tail,tick){
+  const f1=Math.round(Math.sin(tick*0.35)),f2=Math.round(Math.sin(tick*0.35+1.5)*1.5);
+  const a=[h[0]-8,h[1]-2],b=[a[0]-6-tail*2,a[1]+1+f1-tail],c=[b[0]-6-tail*2,b[1]+4+f2-tail*2];
+  const d=[a[0]-5-tail*2,a[1]+4+f2],e=[d[0]-6-tail,d[1]+5-f1-tail];
+  for(const seg of [[a,b],[b,c],[a,d],[d,e]])line(seg[0][0],seg[0][1],seg[1][0],seg[1][1],4,OUT);
+  line(a[0],a[1],b[0],b[1],2,BAND);line(b[0],b[1],c[0],c[1],2,BAND_SH);
+  line(a[0],a[1],d[0],d[1],2,BAND_SH);line(d[0],d[1],e[0],e[1],2,BAND);
+}
+function head(h){
+  const cx=h[0],cy=h[1],r=7;
+  circle(cx,cy,r+1,OUT);
+  for(let y=-r;y<=r;y++)for(let x=-r;x<=r;x++){if(x*x+y*y>r*r+r)continue;let c=SKIN;
+    if(y<=-4)c=(x+y<-7)?HAIR_L:HAIR;else if(y<=-2)c=(x>2)?BAND_SH:BAND;else if(x+y>4)c=SKIN_SH;px(cx+x,cy+y,c);}
+  rect(cx-3,cy-11,5,3,OUT);rect(cx-2,cy-11,3,3,HAIR);rect(cx-8,cy-9,4,3,OUT);rect(cx-7,cy-9,2,2,HAIR_L);rect(cx+2,cy-10,3,2,OUT);rect(cx+2,cy-10,2,2,HAIR);
+  rect(cx-10,cy-4,4,4,OUT);rect(cx-9,cy-3,2,2,BAND);
+  rect(cx-7,cy-1,2,3,SKIN_SH);px(cx-7,cy,OUT);
+  line(cx+1,cy-1,cx+5,cy-1,1,OUT);px(cx+3,cy,WHITE);px(cx+4,cy,OUT);px(cx+6,cy+1,SKIN_SH);
+  rect(cx+3,cy+3,3,1,OUT);px(cx+6,cy+3,SKIN_SH);
+}
+function drawFighter(ox,oy,p,tick){
+  const T=q=>[ox+q[0],oy+q[1]];
+  const bf=T(p.bf),bk=T(p.bk),ff=T(p.ff),fk=T(p.fk),hip=T(p.hip),neck=T(p.neck),hd=T(p.head),
+        bs=T(p.bs),be=T(p.be),bh=T(p.bh),fs=T(p.fs),fe=T(p.fe),fh=T(p.fh);
+  shadow(ox+p.hip[0]+2,oy+1,15,3,SHD);
+  leg([hip[0]-3,hip[1]+2],bk,bf);
+  const fl=Math.round(Math.sin(tick*0.3));
+  limb([hip[0]-4,hip[1]+3],[hip[0]-9-p.tail*3,hip[1]+13+fl-p.tail],3,SASH,SASH_SH);
+  if(!p.front)arm(bs,be,bh);
+  limb(hip,neck,12,SKIN,SKIN_SH);
+  line(neck[0]-4,neck[1]+8,neck[0]+3,neck[1]+8,1,SKIN_SH);
+  line(hip[0]+1,hip[1]-3,neck[0]+1,neck[1]+11,1,SKIN_SH);
+  line(hip[0]-1,hip[1]-6,hip[0]+3,hip[1]-6,1,SKIN_SH);
+  line(neck[0]-3,neck[1]+3,neck[0]-3,neck[1]+7,1,'#e29a68');
+  limb([hip[0]-6,hip[1]+1],[hip[0]+6,hip[1]+1],5,SASH,SASH_SH);
+  rect(hip[0]-3,hip[1],2,1,'#f6a060');
+  headTail(hd,p.tail,tick);head(hd);
+  leg([hip[0]+3,hip[1]+2],fk,ff);
+  arm(fs,fe,fh);
+  if(p.front)arm(bs,be,bh);
+}
+
+/* ---------- effects ---------- */
+function spark(x,y,t){
+  if(t<3){const rot=t?0.39:0,L=t<1?7:11;
+    for(let i=0;i<8;i++){const a=i*Math.PI/4+rot;line(x,y,x+Math.cos(a)*L,y+Math.sin(a)*L,2,i%2?YEL:ORG);}
+    circle(x,y,4,YEL);circle(x,y,2,WHITE);}
+  else if(t<6){for(let i=0;i<8;i++){const a=i*Math.PI/4+0.39+t*0.1;line(x+Math.cos(a)*4,y+Math.sin(a)*4,x+Math.cos(a)*13,y+Math.sin(a)*13,1,i%2?WHITE:YEL);}
+    circle(x,y,3,WHITE);circle(x,y,1,YEL);}
+  else if(t<10){const r=8+(t-6)*2;for(let i=0;i<16;i++){const a=i*Math.PI/8;px(x+Math.round(Math.cos(a)*r),y+Math.round(Math.sin(a)*r),i%2?YEL:ORG);}}
+}
+let dust=[];
+function spawnDust(x,y){for(let i=0;i<5;i++)dust.push({x:x-i*2,y:y-1-(i%2),vx:-0.7-i*0.25,vy:-0.25-(i%3)*0.15,life:14+i});}
+
+/* ---------- loop ---------- */
+let tick=-1,acc=0,last=performance.now(),postOff=0,postVel=0,shake=0,sparkT=-1;
+const SH=[[0,0],[1,0],[-1,1],[2,-1],[-2,0],[2,1],[-1,0]];
+function step(){
+  tick++;
+  const f=frames[tick%total],p=f.p;
+  if(f.i===7&&f.l===0)spawnDust(CX+p.ff[0]-4,GY);
+  if(f.i===8&&f.l===0){postVel=5;shake=6;sparkT=0;}
+  postVel+=-postOff*0.3;postVel*=0.86;postOff+=postVel;
+  if(sparkT>=0){sparkT++;if(sparkT>10)sparkT=-1;}
+  if(shake>0)shake--;
+  for(const d of dust){d.x+=d.vx;d.y+=d.vy;d.vx*=0.9;d.life--;}
+  dust=dust.filter(d=>d.life>0);
+}
+function render(){
+  g.drawImage(bgc,0,0);
+  const f=frames[tick%total],p=f.p;
+  drawPost(CX+43,GY,Math.round(postOff));
+  if(f.i===7||(f.i===8&&f.l<3)){const hx=CX+p.bh[0],hy=GY+p.bh[1];
+    [[-4,12],[0,18],[3,10]].forEach(([k,L],i)=>line(hx-9,hy+k,hx-9-L,hy+k,1,i===1?WHITE:WRAP_SH));}
+  drawFighter(CX,GY,p,tick);
+  for(const d of dust){const r=d.life>8?2:1;circle(Math.round(d.x),Math.round(d.y),r,d.life>4?DUST:DUST_D);}
+  if(sparkT>=0)spark(CX+42,GY-60,sparkT);
+  const s=shake>0?SH[shake]:[0,0];
+  mctx.fillStyle='#000';mctx.fillRect(0,0,960,540);
+  mctx.imageSmoothingEnabled=false;
+  mctx.drawImage(off,0,0,W,H,s[0]*S,s[1]*S,W*S,H*S);
+}
+step();render();
+function loop(now){
+  acc+=Math.min(now-last,100);last=now;
+  let n=0;while(acc>=1000/60&&n<4){step();acc-=1000/60;n++;}
+  if(n)render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
